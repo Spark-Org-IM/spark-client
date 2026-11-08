@@ -1,0 +1,172 @@
+# ============================================================
+# CMake / C++ project .gitignore
+# ============================================================
+
+# ---------- Build output ----------
+build/
+build-*/
+out/
+bin/
+lib/
+cmake-build-*/
+*.o
+*.obj
+*.lo
+*.a
+*.lib
+*.so
+*.so.*
+*.dylib
+*.dll
+*.exe
+*.out
+*.app
+*.mod
+*.smod
+
+# CMake generated files (in-source builds)
+CMakeCache.txt
+CMakeFiles/
+CMakeScripts/
+cmake_install.cmake
+install_manifest.txt
+CTestTestfile.cmake
+Testing/
+_deps/
+*.cmake.stamp
+*.ninja
+.ninja_deps
+.ninja_log
+build.ninja
+rules.ninja
+Makefile
+*.make
+
+# CMake user presets (machine-specific)
+CMakeUserPresets.json
+
+# ---------- Compiler / linker artifacts ----------
+*.gch
+*.pch
+*.pdb
+*.ilk
+*.idb
+*.exp
+*.map
+*.gcno
+*.gcda
+*.gcov
+*.profraw
+*.profdata
+
+# Dependency files
+*.d
+*.dSYM/
+*.su
+
+# ---------- Debugging / profiling ----------
+core
+core.*
+vgcore.*
+*.log
+perf.data*
+*.trace
+
+# ---------- Testing / coverage ----------
+coverage/
+*.lcov
+lcov.info
+codecov/
+.nyc_output/
+
+# ---------- Package managers ----------
+# vcpkg
+vcpkg_installed/
+.vcpkg/
+
+# Conan
+conanbuildinfo.*
+conaninfo.txt
+graph_info.json
+.conan/
+
+# CPM / FetchContent
+_cdeps/
+
+# ---------- IDEs / editors ----------
+# Visual Studio
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Visual Studio Code
+.vscode/
+
+# CLion
+.idea/
+*.iml
+
+# JetBrains
+*.iws
+*.ipr
+.idea_modules/
+
+# Xcode
+*.xcodeproj/
+*.xcworkspace/
+xcuserdata/
+*.xcuserstate
+DerivedData/
+
+# Eclipse / CDT
+.cproject
+.project
+.settings/
+
+# Qt Creator
+*.pro.user
+*.pro.user.*
+CMakeLists.txt.user*
+
+# Vim / Emacs / Sublime
+*.swp
+*.swo
+*~
+.*.sw?
+.sublime-project
+.sublime-workspace
+.sublime-build
+
+# ---------- OS files ----------
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+Icon?
+
+# ---------- Misc ----------
+*.orig
+*.rej
+*.bak
+*.tmp
+*.temp
+*.cache
+.cache/
+tags
+TAGS
+cscope.*
+compile_commands.json
+
+# ---------- Environment / secrets ----------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/

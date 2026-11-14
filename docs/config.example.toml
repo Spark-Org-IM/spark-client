@@ -1,0 +1,54 @@
+# spark-tui configuration
+#
+# Default location: ~/.config/spark-tui/config.toml
+# Override with:   spark-tui --config PATH
+#
+# Effective main/status precedence:
+#   manual override (main/status) -> last synced value -> built-in default
+
+[instance]
+# Static service source. Accepts JSON:
+#   {"home_domain": "...", "services": {"HOME": "...", "STATUS": "..."}}
+# or a plain-text document whose first non-blank line is a bare domain.
+sync_url = 'https://spark-org-im.github.io/api/services.json'
+
+# Sync once in the background at startup.
+sync_on_start = true
+
+# Manual overrides. Omit or comment out to follow the sync source.
+# main = 'https://sparkorg.dpdns.org'
+# status = 'https://status.sparkorg.dpdns.org'
+# forum = 'https://forum.sparkorg.dpdns.org'
+
+# Last successfully synced values. Maintained automatically; do not edit
+# unless you are repairing a broken cache.
+# auto_main = 'https://sparkorg.dpdns.org'
+# auto_status = 'https://status.sparkorg.dpdns.org'
+# auto_forum = 'https://forum.sparkorg.dpdns.org'
+
+[ui]
+# system | zh-cn | en-us
+language = 'zh-cn'
+
+# Skip TLS certificate verification (self-signed development servers).
+insecure = false
+
+# Show raw JSON on detail pages. false = human-readable rendering (default).
+show_raw_details = false
+
+# The [auth] table is written automatically after a successful device-code
+# login and removed on logout. The file is chmod 0600 because it holds a
+# bearer token.
+# [auth]
+# token = 'spark_...'
+# token_id = '12'
+# token_label = 'Spark ORG Android'
+# username = 'jianyin'
+
+# Flarum forum account. Written automatically after a successful forum login
+# and removed on forum logout. The password is never stored.
+# [forum]
+# token = 'flarum_...'
+# user_id = '2'
+# username = 'hoewllo'
+# display_name = 'Jianyin Li'

@@ -1,0 +1,2010 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "name": "Spark ORG API",
+    "apiVersion": "v2",
+    "defaultLanguage": "zh-cn",
+    "languages": [
+        "en-us",
+        "zh-cn"
+    ],
+    "supersedes": "/api/v1/",
+    "note": "v1 只保留静态站产出的 5 个形状（site / news 索引+详情 / contact 索引+详情）并逐字一致，且忽略一切查询参数；本仓库新增的一切（内容重做 / 账号 / 管理 / 令牌 / 搜索 / 成员数据 / platform）都在 v2，字段以本文档为准（由 App\\ApiSchema 生成）。",
+    "endpoints": {
+        "site": {
+            "path": "/api/v2/site.json",
+            "summary": "站点自描述",
+            "description": "语言列表与端点表。新客户端应当先读它。"
+        },
+        "collection": {
+            "paths": [
+                "/api/v2/{lang}/news.json",
+                "/api/v2/{lang}/contact.json",
+                "/api/v2/{lang}/platform.json"
+            ],
+            "summary": "索引（精简行 + 分页）",
+            "description": "只返回渲染列表所需的字段，含 url/priority，因此仅凭索引即可渲染完整列表与深链；正文与大字段一律走单条端点。支持 limit/offset/active/q。",
+            "params": [
+                {
+                    "name": "lang",
+                    "in": "path",
+                    "required": true,
+                    "type": "string",
+                    "description": "语言代码，取 site.json 的 languages / Language code; see site.json languages"
+                },
+                {
+                    "name": "limit",
+                    "in": "query",
+                    "required": false,
+                    "type": "number",
+                    "description": "本页条数，1..100，缺省 20 / Page size, 1..100, default 20"
+                },
+                {
+                    "name": "offset",
+                    "in": "query",
+                    "required": false,
+                    "type": "number",
+                    "description": "跳过前 N 条，缺省 0 / Skip N entries, default 0"
+                },
+                {
+                    "name": "active",
+                    "in": "query",
+                    "required": false,
+                    "type": "boolean",
+                    "description": "true/false 过滤启用状态；非法值返回 400 / Filter by active flag; invalid values return 400"
+                },
+                {
+                    "name": "q",
+                    "in": "query",
+                    "required": false,
+                    "type": "string",
+                    "description": "按标题/简介/名称模糊搜索，覆盖 desc / Fuzzy search over title/description/name"
+                }
+            ]
+        },
+        "item": {
+            "paths": [
+                "/api/v2/{lang}/news/{slug}.json",
+                "/api/v2/{lang}/contact/{slug}.json",
+                "/api/v2/{lang}/platform/{slug}.json"
+            ],
+            "summary": "单条全量记录",
+            "description": "按 slug 取该类别的全部字段。",
+            "params": [
+                {
+                    "name": "lang",
+                    "in": "path",
+                    "required": true,
+                    "type": "string"
+                },
+                {
+                    "name": "slug",
+                    "in": "path",
+                    "required": true,
+                    "type": "string"
+                }
+            ]
+        },
+        "search": {
+            "path": "/api/v2/{lang}/search.json",
+            "summary": "跨类别搜索（仅公开内容）",
+            "description": "对新闻/联系人/开放平台做大小写无关的子串搜索。不传 kind 即跨三类（大杂烩）。管理侧（/admin/search）必须指定 target，见交接文档 §9.2。",
+            "params": [
+                {
+                    "name": "kind",
+                    "in": "query",
+                    "required": false,
+                    "type": "string",
+                    "enum": [
+                        "news",
+                        "contact",
+                        "platform"
+                    ],
+                    "description": "不传即跨三类一起搜（大杂烩）"
+                },
+                {
+                    "name": "lang",
+                    "in": "path",
+                    "required": true,
+                    "type": "string",
+                    "description": "语言代码，取 site.json 的 languages / Language code; see site.json languages"
+                },
+                {
+                    "name": "limit",
+                    "in": "query",
+                    "required": false,
+                    "type": "number",
+                    "description": "本页条数，1..100，缺省 20 / Page size, 1..100, default 20"
+                },
+                {
+                    "name": "offset",
+                    "in": "query",
+                    "required": false,
+                    "type": "number",
+                    "description": "跳过前 N 条，缺省 0 / Skip N entries, default 0"
+                },
+                {
+                    "name": "active",
+                    "in": "query",
+                    "required": false,
+                    "type": "boolean",
+                    "description": "true/false 过滤启用状态；非法值返回 400 / Filter by active flag; invalid values return 400"
+                },
+                {
+                    "name": "q",
+                    "in": "query",
+                    "required": false,
+                    "type": "string",
+                    "description": "按标题/简介/名称模糊搜索，覆盖 desc / Fuzzy search over title/description/name"
+                }
+            ]
+        },
+        "userProfile": {
+            "path": "/api/v2/{lang}/user/{username}.json",
+            "summary": "他人只读资料（按可见性三态返回）",
+            "description": "本人（会话/Bearer）永远可见；他人需 users.visibility.profile 允许（public = 匿名可见、logged_in = 登录可见）；hidden、缺省与「用户名不存在」返回完全相同的 404 信封（防枚举）。只读字段 username/fullName/avatar/role/lastSeenAt/pgpPublicKey（B1：PGP 公钥，仅公钥，未设置为 null），绝不回显 email、权限位或凭据；网页版壳页是 /page/user.html?username=。",
+            "params": [
+                {
+                    "name": "lang",
+                    "in": "path",
+                    "required": true,
+                    "type": "string"
+                },
+                {
+                    "name": "username",
+                    "in": "path",
+                    "required": true,
+                    "type": "string"
+                }
+            ]
+        },
+        "schema": {
+            "path": "/api/v2/schema.json",
+            "summary": "本文档（机器可读）",
+            "description": "由 App\\ApiSchema 生成；新增端点/字段后本文件自动同步。"
+        },
+        "openapi": {
+            "path": "/api/v2/openapi.json",
+            "summary": "OpenAPI 3.1 文档",
+            "description": "可直接导入 Swagger UI / Postman / 代码生成器。"
+        },
+        "guide": {
+            "path": "/docs/api-guide.html",
+            "summary": "人话教程（多语言）",
+            "description": "面向人的分语言说明：/docs/api-guide.html（跟随站点语言切换），或直接取原始 markdown /docs/api-guide.{lang}.md。"
+        }
+    },
+    "schemas": {
+        "NewsIndex": {
+            "type": "object",
+            "properties": {
+                "slug": {
+                    "type": "string",
+                    "descriptions": {
+                        "zh-cn": "条目标识；详情走 /api/v2/{lang}/news/{slug}",
+                        "en-us": "Entry identifier; details at /api/v2/{lang}/news/{slug}"
+                    }
+                },
+                "date": {
+                    "type": "object",
+                    "properties": {
+                        "accuracy": {
+                            "type": "string",
+                            "enum": [
+                                "year",
+                                "month",
+                                "day",
+                                "hour",
+                                "minute",
+                                "second"
+                            ]
+                        },
+                        "start": {
+                            "type": "string"
+                        }
+                    },
+                    "required": [
+                        "start"
+                    ],
+                    "descriptions": {
+                        "zh-cn": "发布日期（start 为 YYYY-MM-DD HH:MM:SS）",
+                        "en-us": "Publication date (start is YYYY-MM-DD HH:MM:SS)"
+                    }
+                },
+                "title": {
+                    "type": "string",
+                    "descriptions": {
+                        "zh-cn": "标题",
+                        "en-us": "Title"
+                    },
+                    "x-i18n": true
+                },
+                "url": {
+                    "type": "string",
+                    "descriptions": {
+                        "zh-cn": "站内深度链接 /news#news-{slug}（无语言段；页面语言取访客的 spark-lang Cookie / Accept-Language）",
+                        "en-us": "In-site deep link /news#news-{slug} (no language segment; the page language comes from the viewer's spark-lang cookie / Accept-Language)"
+                    }
+                },
+                "priority": {
+                    "type": "integer",
+                    "descriptions": {
+                        "zh-cn": "排序权重，数值越小越靠前（缺省 999）",
+                        "en-us": "Sort weight, ascending; missing counts as 999"
+                    }
+                },
+                "active": {
+                    "type": "boolean",
+                    "descriptions": {
+                        "zh-cn": "是否启用；索引包含未启用条目",
+                        "en-us": "Whether the entry is active; the index includes inactive ones"
+                    }
+                }
+            },
+            "required": [
+                "slug",
+                "title",
+                "url",
+                "priority",
+                "active"
+            ],
+            "additionalProperties": false
+        },
+        "NewsFull": {
+            "type": "object",
+            "properties": {
+                "slug": {
+                    "type": "string",
+                    "descriptions": {
+                        "zh-cn": "条目标识",
+                        "en-us": "Entry identifier"
+                    }
+                },
+                "date": {
+                    "type": "object",
+                    "properties": {
+                        "accuracy": {
+                            "type": "string",
+                            "enum": [
+                                "year",
+                                "month",
+                                "day",
+                                "hour",
+                                "minute",
+                                "second"
+                            ]
+                        },
+                        "start": {
+                            "type": "string"
+                        }
+                    },
+                    "required": [
+                        "start"
+                    ],
+                    "descriptions": {
+                        "zh-cn": "发布日期",
+                        "en-us": "Publication date"
+                    }
+                },
+                "title": {
+                    "type": "string",
+                    "descriptions": {
+                        "zh-cn": "标题",
+                        "en-us": "Title"
+                    },
+                    "x-i18n": true
+                },
+                "desc": {
+                    "type": "string",
+                    "descriptions": {
+                        "zh-cn": "正文，可能包含 HTML 标签",
+                        "en-us": "Body text; may contain HTML"
+                    },
+                    "x-i18n": true
+                },
+                "url": {
+                    "type": "string",
+                    "descriptions": {
+                        "zh-cn": "站内深度链接 /news#news-{slug}（与索引同值）",
+                        "en-us": "In-site deep link /news#news-{slug} (same value as the index row)"
+                    }
+                },
+                "priority": {
+                    "type": "integer",
+                    "descriptions": {
+                        "zh-cn": "排序权重，缺省 999",
+                        "en-us": "Sort weight, missing counts as 999"
+                    }
+                },
+                "active": {
+                    "type": "boolean",
+                    "descriptions": {
+                        "zh-cn": "是否启用",
+                        "en-us": "Whether the entry is active"
+                    }
+                },
+                "place": {
+                    "type": "object",
+                    "properties": {
+                        "desc": {
+                            "type": "string"
+                        },
+                        "geo": {
+                            "type": "string"
+                        }
+                    },
+                    "descriptions": {
+                        "zh-cn": "地点（geo 为 WGS-84 \"lat,long\"，可缺省）",
+                        "en-us": "Place (geo is WGS-84 \"lat,long\", may be absent)"
+                    },
+                    "x-i18n": true
+                },
+                "images": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "url": {
+                                "type": "string"
+                            },
+                            "alt": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "descriptions": {
+                        "zh-cn": "图片列表 [{ url, alt }]",
+                        "en-us": "Image list [{ url, alt }]"
+                    }
+                }
+            },
+            "required": [
+                "slug",
+                "title",
+                "desc",
+                "url",
+                "priority",
+                "active",
+                "images"
+            ],
+            "additionalProperties": false
+        },
+        "NewsCollection": {
+            "type": "object",
+            "envelope": {
+                "type": "object",
+                "properties": {
+                    "endpoint": {
+                        "type": "string",
+                        "description": "产生本次响应的端点模板（自描述）"
+                    },
+                    "apiVersion": {
+                        "type": "string"
+                    },
+                    "lang": {
+                        "type": "string",
+                        "description": "本次响应的语言"
+                    },
+                    "kind": {
+                        "type": "string",
+                        "enum": [
+                            "news"
+                        ]
+                    },
+                    "count": {
+                        "type": "integer",
+                        "description": "本次返回的条目数"
+                    },
+                    "total": {
+                        "type": "integer",
+                        "description": "过滤后符合条件的总条目数——区分「没有更多」与「被过滤掉」"
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "本次生效的分页大小"
+                    },
+                    "offset": {
+                        "type": "integer",
+                        "description": "本次跳过的条目数"
+                    },
+                    "hasMore": {
+                        "type": "boolean",
+                        "description": "后面是否还有页"
+                    },
+                    "items": {
+                        "type": "array",
+                        "items": {
+                            "oneOf": [
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "slug": {
+                                            "type": "string",
+                                            "descriptions": {
+                                                "zh-cn": "条目标识；详情走 /api/v2/{lang}/news/{slug}",
+                                                "en-us": "Entry identifier; details at /api/v2/{lang}/news/{slug}"
+                                            }
+                                        },
+                                        "date": {
+                                            "type": "object",
+                                            "properties": {
+                                                "accuracy": {
+                                                    "type": "string",
+                                                    "enum": [
+                                                        "year",
+                                                        "month",
+                                                        "day",
+                                                        "hour",
+                                                        "minute",
+                                                        "second"
+                                                    ]
+                                                },
+                                                "start": {
+                                                    "type": "string"
+                                                }
+                                            },
+                                            "required": [
+                                                "start"
+                                            ],
+                                            "descriptions": {
+                                                "zh-cn": "发布日期（start 为 YYYY-MM-DD HH:MM:SS）",
+                                                "en-us": "Publication date (start is YYYY-MM-DD HH:MM:SS)"
+                                            }
+                                        },
+                                        "title": {
+                                            "type": "string",
+                                            "descriptions": {
+                                                "zh-cn": "标题",
+                                                "en-us": "Title"
+                                            },
+                                            "x-i18n": true
+                                        },
+                                        "url": {
+                                            "type": "string",
+                                            "descriptions": {
+                                                "zh-cn": "站内深度链接 /news#news-{slug}（无语言段；页面语言取访客的 spark-lang Cookie / Accept-Language）",
+                                                "en-us": "In-site deep link /news#news-{slug} (no language segment; the page language comes from the viewer's spark-lang cookie / Accept-Language)"
+                                            }
+                                        },
+                                        "priority": {
+                                            "type": "integer",
+                                            "descriptions": {
+                                                "zh-cn": "排序权重，数值越小越靠前（缺省 999）",
+                                                "en-us": "Sort weight, ascending; missing counts as 999"
+                                            }
+                                        },
+                                        "active": {
+                                            "type": "boolean",
+                                            "descriptions": {
+                                                "zh-cn": "是否启用；索引包含未启用条目",
+                                                "en-us": "Whether the entry is active; the index includes inactive ones"
+                                            }
+                                        }
+                                    },
+                                    "required": [
+                                        "slug",
+                                        "title",
+                                        "url",
+                                        "priority",
+                                        "active"
+                                    ],
+                                    "additionalProperties": false
+                                }
+                            ]
+                        },
+                        "description": "精简索引行；全量记录走单条端点"
+                    }
+                },
+                "required": [
+                    "endpoint",
+                    "apiVersion",
+                    "lang",
+                    "kind",
+                    "count",
+                    "total",
+                    "limit",
+                    "offset",
+                    "hasMore",
+                    "items"
+                ],
+                "additionalProperties": false
+            }
+        },
+        "ContactIndex": {
+            "type": "object",
+            "properties": {
+                "slug": {
+                    "type": "string",
+                    "descriptions": {
+                        "zh-cn": "条目标识；详情走 /api/v2/{lang}/contact/{slug}",
+                        "en-us": "Entry identifier; details at /api/v2/{lang}/contact/{slug}"
+                    }
+                },
+                "name": {
+                    "type": "string",
+                    "descriptions": {
+                        "zh-cn": "姓名",
+                        "en-us": "Name"
+                    }
+                },
+                "title": {
+                    "type": "string",
+                    "descriptions": {
+                        "zh-cn": "职务，可能为空字符串",
+                        "en-us": "Role; may be an empty string"
+                    },
+                    "x-i18n": true
+                },
+                "url": {
+                    "type": "string",
+                    "descriptions": {
+                        "zh-cn": "站内深度链接 /contact#contact-{slug}（无语言段）",
+                        "en-us": "In-site deep link /contact#contact-{slug} (no language segment)"
+                    }
+                },
+                "priority": {
+                    "type": "integer",
+                    "descriptions": {
+                        "zh-cn": "排序权重",
+                        "en-us": "Sort weight"
+                    }
+                }
+            },
+            "required": [
+                "slug",
+                "name",
+                "title",
+                "url",
+                "priority"
+            ],
+            "additionalProperties": false
+        },
+        "ContactFull": {
+            "type": "object",
+            "properties": {
+                "slug": {
+                    "type": "string",
+                    "descriptions": {
+                        "zh-cn": "条目标识",
+                        "en-us": "Entry identifier"
+                    }
+                },
+                "name": {
+                    "type": "string",
+                    "descriptions": {
+                        "zh-cn": "姓名",
+                        "en-us": "Name"
+                    }
+                },
+                "title": {
+                    "type": "string",
+                    "descriptions": {
+                        "zh-cn": "职务，可能为空字符串",
+                        "en-us": "Role; may be an empty string"
+                    },
+                    "x-i18n": true
+                },
+                "url": {
+                    "type": "string",
+                    "descriptions": {
+                        "zh-cn": "站内深度链接 /contact#contact-{slug}（与索引同值）",
+                        "en-us": "In-site deep link /contact#contact-{slug} (same value as the index row)"
+                    }
+                },
+                "priority": {
+                    "type": "integer",
+                    "descriptions": {
+                        "zh-cn": "排序权重，缺省 999",
+                        "en-us": "Sort weight, missing counts as 999"
+                    }
+                },
+                "tel": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "descriptions": {
+                        "zh-cn": "电话",
+                        "en-us": "Phone numbers"
+                    }
+                },
+                "email": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "descriptions": {
+                        "zh-cn": "邮箱",
+                        "en-us": "Email addresses"
+                    }
+                },
+                "homepage": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": {
+                                "type": "string"
+                            },
+                            "url": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "descriptions": {
+                        "zh-cn": "主页 [{ name, url }]",
+                        "en-us": "Homepages [{ name, url }]"
+                    }
+                },
+                "telExtra": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "descriptions": {
+                        "zh-cn": "备用电话",
+                        "en-us": "Extra phone numbers"
+                    }
+                },
+                "emailExtra": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "descriptions": {
+                        "zh-cn": "备用邮箱",
+                        "en-us": "Extra email addresses"
+                    }
+                },
+                "social": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": {
+                                "type": "string"
+                            },
+                            "url": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "descriptions": {
+                        "zh-cn": "社交主页 [{ name, url }]",
+                        "en-us": "Social links [{ name, url }]"
+                    }
+                },
+                "homepageExtra": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": {
+                                "type": "string"
+                            },
+                            "url": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "descriptions": {
+                        "zh-cn": "备用主页 [{ name, url }]",
+                        "en-us": "Extra homepages [{ name, url }]"
+                    }
+                },
+                "pgpFingerprint": {
+                    "type": "string",
+                    "descriptions": {
+                        "zh-cn": "PGP 公钥指纹",
+                        "en-us": "PGP fingerprint"
+                    }
+                },
+                "pgpKey": {
+                    "type": "string",
+                    "descriptions": {
+                        "zh-cn": "PGP 公钥全文（ASCII Armor，约 2KB/人）",
+                        "en-us": "PGP public key, ASCII Armor (~2KB each)"
+                    }
+                }
+            },
+            "required": [
+                "slug",
+                "name",
+                "title",
+                "url",
+                "priority",
+                "tel",
+                "email",
+                "homepage",
+                "telExtra",
+                "emailExtra",
+                "social",
+                "homepageExtra",
+                "pgpFingerprint",
+                "pgpKey"
+            ],
+            "additionalProperties": false
+        },
+        "ContactCollection": {
+            "type": "object",
+            "envelope": {
+                "type": "object",
+                "properties": {
+                    "endpoint": {
+                        "type": "string",
+                        "description": "产生本次响应的端点模板（自描述）"
+                    },
+                    "apiVersion": {
+                        "type": "string"
+                    },
+                    "lang": {
+                        "type": "string",
+                        "description": "本次响应的语言"
+                    },
+                    "kind": {
+                        "type": "string",
+                        "enum": [
+                            "contact"
+                        ]
+                    },
+                    "count": {
+                        "type": "integer",
+                        "description": "本次返回的条目数"
+                    },
+                    "total": {
+                        "type": "integer",
+                        "description": "过滤后符合条件的总条目数——区分「没有更多」与「被过滤掉」"
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "本次生效的分页大小"
+                    },
+                    "offset": {
+                        "type": "integer",
+                        "description": "本次跳过的条目数"
+                    },
+                    "hasMore": {
+                        "type": "boolean",
+                        "description": "后面是否还有页"
+                    },
+                    "items": {
+                        "type": "array",
+                        "items": {
+                            "oneOf": [
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "slug": {
+                                            "type": "string",
+                                            "descriptions": {
+                                                "zh-cn": "条目标识；详情走 /api/v2/{lang}/contact/{slug}",
+                                                "en-us": "Entry identifier; details at /api/v2/{lang}/contact/{slug}"
+                                            }
+                                        },
+                                        "name": {
+                                            "type": "string",
+                                            "descriptions": {
+                                                "zh-cn": "姓名",
+                                                "en-us": "Name"
+                                            }
+                                        },
+                                        "title": {
+                                            "type": "string",
+                                            "descriptions": {
+                                                "zh-cn": "职务，可能为空字符串",
+                                                "en-us": "Role; may be an empty string"
+                                            },
+                                            "x-i18n": true
+                                        },
+                                        "url": {
+                                            "type": "string",
+                                            "descriptions": {
+                                                "zh-cn": "站内深度链接 /contact#contact-{slug}（无语言段）",
+                                                "en-us": "In-site deep link /contact#contact-{slug} (no language segment)"
+                                            }
+                                        },
+                                        "priority": {
+                                            "type": "integer",
+                                            "descriptions": {
+                                                "zh-cn": "排序权重",
+                                                "en-us": "Sort weight"
+                                            }
+                                        }
+                                    },
+                                    "required": [
+                                        "slug",
+                                        "name",
+                                        "title",
+                                        "url",
+                                        "priority"
+                                    ],
+                                    "additionalProperties": false
+                                }
+                            ]
+                        },
+                        "description": "精简索引行；全量记录走单条端点"
+                    }
+                },
+                "required": [
+                    "endpoint",
+                    "apiVersion",
+                    "lang",
+                    "kind",
+                    "count",
+                    "total",
+                    "limit",
+                    "offset",
+                    "hasMore",
+                    "items"
+                ],
+                "additionalProperties": false
+            }
+        },
+        "PlatformIndex": {
+            "type": "object",
+            "properties": {
+                "slug": {
+                    "type": "string",
+                    "descriptions": {
+                        "zh-cn": "条目标识；详情走 /api/v2/{lang}/platform/{slug}",
+                        "en-us": "Entry identifier; details at /api/v2/{lang}/platform/{slug}"
+                    }
+                },
+                "name": {
+                    "type": "string",
+                    "descriptions": {
+                        "zh-cn": "服务名称",
+                        "en-us": "Service name"
+                    },
+                    "x-i18n": true
+                },
+                "desc": {
+                    "type": "string",
+                    "descriptions": {
+                        "zh-cn": "服务简介（一行即可用于列表）",
+                        "en-us": "Service description (one line is enough for a list)"
+                    },
+                    "x-i18n": true
+                },
+                "url": {
+                    "type": "string",
+                    "descriptions": {
+                        "zh-cn": "服务地址（外链，不是站内页面）",
+                        "en-us": "Service URL (external — NOT a page on this site)"
+                    }
+                },
+                "pageUrl": {
+                    "type": "string",
+                    "descriptions": {
+                        "zh-cn": "站内页面锚点 /platform#platform-{slug}",
+                        "en-us": "In-site page anchor /platform#platform-{slug}"
+                    }
+                },
+                "priority": {
+                    "type": "integer",
+                    "descriptions": {
+                        "zh-cn": "排序权重",
+                        "en-us": "Sort weight"
+                    }
+                }
+            },
+            "required": [
+                "slug",
+                "name",
+                "desc",
+                "url",
+                "pageUrl",
+                "priority"
+            ],
+            "additionalProperties": false
+        },
+        "PlatformFull": {
+            "type": "object",
+            "properties": {
+                "slug": {
+                    "type": "string",
+                    "descriptions": {
+                        "zh-cn": "条目标识",
+                        "en-us": "Entry identifier"
+                    }
+                },
+                "name": {
+                    "type": "string",
+                    "descriptions": {
+                        "zh-cn": "服务名称",
+                        "en-us": "Service name"
+                    },
+                    "x-i18n": true
+                },
+                "desc": {
+                    "type": "string",
+                    "descriptions": {
+                        "zh-cn": "服务简介",
+                        "en-us": "Service description"
+                    },
+                    "x-i18n": true
+                },
+                "button": {
+                    "type": "string",
+                    "descriptions": {
+                        "zh-cn": "按钮文案",
+                        "en-us": "Button label"
+                    },
+                    "x-i18n": true
+                },
+                "url": {
+                    "type": "string",
+                    "descriptions": {
+                        "zh-cn": "服务地址（外链，不是站内页面）",
+                        "en-us": "Service URL (external — NOT a page on this site)"
+                    }
+                },
+                "priority": {
+                    "type": "integer",
+                    "descriptions": {
+                        "zh-cn": "排序权重，缺省 999",
+                        "en-us": "Sort weight, missing counts as 999"
+                    }
+                },
+                "pageUrl": {
+                    "type": "string",
+                    "descriptions": {
+                        "zh-cn": "站内页面锚点 /platform#platform-{slug}",
+                        "en-us": "In-site page anchor /platform#platform-{slug}"
+                    }
+                }
+            },
+            "required": [
+                "slug",
+                "name",
+                "desc",
+                "button",
+                "url",
+                "priority",
+                "pageUrl"
+            ],
+            "additionalProperties": false
+        },
+        "PlatformCollection": {
+            "type": "object",
+            "envelope": {
+                "type": "object",
+                "properties": {
+                    "endpoint": {
+                        "type": "string",
+                        "description": "产生本次响应的端点模板（自描述）"
+                    },
+                    "apiVersion": {
+                        "type": "string"
+                    },
+                    "lang": {
+                        "type": "string",
+                        "description": "本次响应的语言"
+                    },
+                    "kind": {
+                        "type": "string",
+                        "enum": [
+                            "platform"
+                        ]
+                    },
+                    "count": {
+                        "type": "integer",
+                        "description": "本次返回的条目数"
+                    },
+                    "total": {
+                        "type": "integer",
+                        "description": "过滤后符合条件的总条目数——区分「没有更多」与「被过滤掉」"
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "本次生效的分页大小"
+                    },
+                    "offset": {
+                        "type": "integer",
+                        "description": "本次跳过的条目数"
+                    },
+                    "hasMore": {
+                        "type": "boolean",
+                        "description": "后面是否还有页"
+                    },
+                    "items": {
+                        "type": "array",
+                        "items": {
+                            "oneOf": [
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "slug": {
+                                            "type": "string",
+                                            "descriptions": {
+                                                "zh-cn": "条目标识；详情走 /api/v2/{lang}/platform/{slug}",
+                                                "en-us": "Entry identifier; details at /api/v2/{lang}/platform/{slug}"
+                                            }
+                                        },
+                                        "name": {
+                                            "type": "string",
+                                            "descriptions": {
+                                                "zh-cn": "服务名称",
+                                                "en-us": "Service name"
+                                            },
+                                            "x-i18n": true
+                                        },
+                                        "desc": {
+                                            "type": "string",
+                                            "descriptions": {
+                                                "zh-cn": "服务简介（一行即可用于列表）",
+                                                "en-us": "Service description (one line is enough for a list)"
+                                            },
+                                            "x-i18n": true
+                                        },
+                                        "url": {
+                                            "type": "string",
+                                            "descriptions": {
+                                                "zh-cn": "服务地址（外链，不是站内页面）",
+                                                "en-us": "Service URL (external — NOT a page on this site)"
+                                            }
+                                        },
+                                        "pageUrl": {
+                                            "type": "string",
+                                            "descriptions": {
+                                                "zh-cn": "站内页面锚点 /platform#platform-{slug}",
+                                                "en-us": "In-site page anchor /platform#platform-{slug}"
+                                            }
+                                        },
+                                        "priority": {
+                                            "type": "integer",
+                                            "descriptions": {
+                                                "zh-cn": "排序权重",
+                                                "en-us": "Sort weight"
+                                            }
+                                        }
+                                    },
+                                    "required": [
+                                        "slug",
+                                        "name",
+                                        "desc",
+                                        "url",
+                                        "pageUrl",
+                                        "priority"
+                                    ],
+                                    "additionalProperties": false
+                                }
+                            ]
+                        },
+                        "description": "精简索引行；全量记录走单条端点"
+                    }
+                },
+                "required": [
+                    "endpoint",
+                    "apiVersion",
+                    "lang",
+                    "kind",
+                    "count",
+                    "total",
+                    "limit",
+                    "offset",
+                    "hasMore",
+                    "items"
+                ],
+                "additionalProperties": false
+            }
+        },
+        "Site": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string"
+                },
+                "apiVersion": {
+                    "type": "string"
+                },
+                "defaultLanguage": {
+                    "type": "string"
+                },
+                "languages": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "endpoints": {
+                    "type": "object",
+                    "description": "端点表；self 指向本文档"
+                },
+                "fieldSummary": {
+                    "type": "object",
+                    "description": "每个 kind 的索引/全量字段清单，指向 schema"
+                }
+            },
+            "required": [
+                "name",
+                "apiVersion",
+                "defaultLanguage",
+                "languages",
+                "endpoints"
+            ]
+        },
+        "SearchResult": {
+            "type": "object",
+            "properties": {
+                "endpoint": {
+                    "type": "string"
+                },
+                "apiVersion": {
+                    "type": "string"
+                },
+                "lang": {
+                    "type": "string"
+                },
+                "query": {
+                    "type": "string",
+                    "description": "实际用于匹配的查询串"
+                },
+                "kinds": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "description": "本次搜索覆盖的类别"
+                },
+                "total": {
+                    "type": "integer",
+                    "description": "命中总数"
+                },
+                "count": {
+                    "type": "integer",
+                    "description": "本次返回的命中数（受 limit 约束）"
+                },
+                "limit": {
+                    "type": "integer"
+                },
+                "offset": {
+                    "type": "integer"
+                },
+                "hasMore": {
+                    "type": "boolean"
+                },
+                "groups": {
+                    "type": "object",
+                    "description": "按 kind 分组的索引行",
+                    "properties": {
+                        "news": {
+                            "type": "object",
+                            "properties": {
+                                "kind": {
+                                    "type": "string"
+                                },
+                                "count": {
+                                    "type": "integer"
+                                },
+                                "items": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "slug": {
+                                                "type": "string",
+                                                "descriptions": {
+                                                    "zh-cn": "条目标识；详情走 /api/v2/{lang}/news/{slug}",
+                                                    "en-us": "Entry identifier; details at /api/v2/{lang}/news/{slug}"
+                                                }
+                                            },
+                                            "date": {
+                                                "type": "object",
+                                                "properties": {
+                                                    "accuracy": {
+                                                        "type": "string",
+                                                        "enum": [
+                                                            "year",
+                                                            "month",
+                                                            "day",
+                                                            "hour",
+                                                            "minute",
+                                                            "second"
+                                                        ]
+                                                    },
+                                                    "start": {
+                                                        "type": "string"
+                                                    }
+                                                },
+                                                "required": [
+                                                    "start"
+                                                ],
+                                                "descriptions": {
+                                                    "zh-cn": "发布日期（start 为 YYYY-MM-DD HH:MM:SS）",
+                                                    "en-us": "Publication date (start is YYYY-MM-DD HH:MM:SS)"
+                                                }
+                                            },
+                                            "title": {
+                                                "type": "string",
+                                                "descriptions": {
+                                                    "zh-cn": "标题",
+                                                    "en-us": "Title"
+                                                },
+                                                "x-i18n": true
+                                            },
+                                            "url": {
+                                                "type": "string",
+                                                "descriptions": {
+                                                    "zh-cn": "站内深度链接 /news#news-{slug}（无语言段；页面语言取访客的 spark-lang Cookie / Accept-Language）",
+                                                    "en-us": "In-site deep link /news#news-{slug} (no language segment; the page language comes from the viewer's spark-lang cookie / Accept-Language)"
+                                                }
+                                            },
+                                            "priority": {
+                                                "type": "integer",
+                                                "descriptions": {
+                                                    "zh-cn": "排序权重，数值越小越靠前（缺省 999）",
+                                                    "en-us": "Sort weight, ascending; missing counts as 999"
+                                                }
+                                            },
+                                            "active": {
+                                                "type": "boolean",
+                                                "descriptions": {
+                                                    "zh-cn": "是否启用；索引包含未启用条目",
+                                                    "en-us": "Whether the entry is active; the index includes inactive ones"
+                                                }
+                                            }
+                                        },
+                                        "required": [
+                                            "slug",
+                                            "title",
+                                            "url",
+                                            "priority",
+                                            "active"
+                                        ],
+                                        "additionalProperties": false
+                                    }
+                                }
+                            },
+                            "required": [
+                                "kind",
+                                "count",
+                                "items"
+                            ]
+                        },
+                        "contact": {
+                            "type": "object",
+                            "properties": {
+                                "kind": {
+                                    "type": "string"
+                                },
+                                "count": {
+                                    "type": "integer"
+                                },
+                                "items": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "slug": {
+                                                "type": "string",
+                                                "descriptions": {
+                                                    "zh-cn": "条目标识；详情走 /api/v2/{lang}/contact/{slug}",
+                                                    "en-us": "Entry identifier; details at /api/v2/{lang}/contact/{slug}"
+                                                }
+                                            },
+                                            "name": {
+                                                "type": "string",
+                                                "descriptions": {
+                                                    "zh-cn": "姓名",
+                                                    "en-us": "Name"
+                                                }
+                                            },
+                                            "title": {
+                                                "type": "string",
+                                                "descriptions": {
+                                                    "zh-cn": "职务，可能为空字符串",
+                                                    "en-us": "Role; may be an empty string"
+                                                },
+                                                "x-i18n": true
+                                            },
+                                            "url": {
+                                                "type": "string",
+                                                "descriptions": {
+                                                    "zh-cn": "站内深度链接 /contact#contact-{slug}（无语言段）",
+                                                    "en-us": "In-site deep link /contact#contact-{slug} (no language segment)"
+                                                }
+                                            },
+                                            "priority": {
+                                                "type": "integer",
+                                                "descriptions": {
+                                                    "zh-cn": "排序权重",
+                                                    "en-us": "Sort weight"
+                                                }
+                                            }
+                                        },
+                                        "required": [
+                                            "slug",
+                                            "name",
+                                            "title",
+                                            "url",
+                                            "priority"
+                                        ],
+                                        "additionalProperties": false
+                                    }
+                                }
+                            },
+                            "required": [
+                                "kind",
+                                "count",
+                                "items"
+                            ]
+                        },
+                        "platform": {
+                            "type": "object",
+                            "properties": {
+                                "kind": {
+                                    "type": "string"
+                                },
+                                "count": {
+                                    "type": "integer"
+                                },
+                                "items": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "slug": {
+                                                "type": "string",
+                                                "descriptions": {
+                                                    "zh-cn": "条目标识；详情走 /api/v2/{lang}/platform/{slug}",
+                                                    "en-us": "Entry identifier; details at /api/v2/{lang}/platform/{slug}"
+                                                }
+                                            },
+                                            "name": {
+                                                "type": "string",
+                                                "descriptions": {
+                                                    "zh-cn": "服务名称",
+                                                    "en-us": "Service name"
+                                                },
+                                                "x-i18n": true
+                                            },
+                                            "desc": {
+                                                "type": "string",
+                                                "descriptions": {
+                                                    "zh-cn": "服务简介（一行即可用于列表）",
+                                                    "en-us": "Service description (one line is enough for a list)"
+                                                },
+                                                "x-i18n": true
+                                            },
+                                            "url": {
+                                                "type": "string",
+                                                "descriptions": {
+                                                    "zh-cn": "服务地址（外链，不是站内页面）",
+                                                    "en-us": "Service URL (external — NOT a page on this site)"
+                                                }
+                                            },
+                                            "pageUrl": {
+                                                "type": "string",
+                                                "descriptions": {
+                                                    "zh-cn": "站内页面锚点 /platform#platform-{slug}",
+                                                    "en-us": "In-site page anchor /platform#platform-{slug}"
+                                                }
+                                            },
+                                            "priority": {
+                                                "type": "integer",
+                                                "descriptions": {
+                                                    "zh-cn": "排序权重",
+                                                    "en-us": "Sort weight"
+                                                }
+                                            }
+                                        },
+                                        "required": [
+                                            "slug",
+                                            "name",
+                                            "desc",
+                                            "url",
+                                            "pageUrl",
+                                            "priority"
+                                        ],
+                                        "additionalProperties": false
+                                    }
+                                }
+                            },
+                            "required": [
+                                "kind",
+                                "count",
+                                "items"
+                            ]
+                        }
+                    }
+                }
+            },
+            "required": [
+                "endpoint",
+                "apiVersion",
+                "lang",
+                "query",
+                "kinds",
+                "total",
+                "count",
+                "limit",
+                "offset",
+                "hasMore",
+                "groups"
+            ]
+        },
+        "UserProfile": {
+            "type": "object",
+            "properties": {
+                "username": {
+                    "type": "string",
+                    "descriptions": {
+                        "zh-cn": "用户名（唯一标识）",
+                        "en-us": "Username (unique identifier)"
+                    }
+                },
+                "fullName": {
+                    "type": "string",
+                    "descriptions": {
+                        "zh-cn": "显示名；为空时回退为用户名",
+                        "en-us": "Display name; falls back to the username"
+                    }
+                },
+                "avatar": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "descriptions": {
+                        "zh-cn": "头像相对路径（站点根下，如 assets/uploads/avatars/u.png）；无头像为 null",
+                        "en-us": "Avatar path relative to the site root (e.g. assets/uploads/avatars/u.png); null when absent"
+                    }
+                },
+                "role": {
+                    "type": "string",
+                    "descriptions": {
+                        "zh-cn": "角色 admin|user|guest（只读，不回显权限位）",
+                        "en-us": "Role admin|user|guest (read-only; grants are never echoed)"
+                    }
+                },
+                "lastSeenAt": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "descriptions": {
+                        "zh-cn": "最近在线时间（UTC，YYYY-MM-DD HH:MM:SS）；从未在线为 null",
+                        "en-us": "Last seen timestamp (UTC, YYYY-MM-DD HH:MM:SS); null when never seen"
+                    }
+                },
+                "emails": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "descriptions": {
+                        "zh-cn": "PGP 公钥用户身份里自称的邮箱（公钥自己写的，是否可信由**验签者**判断：见指纹与签名数；账号 email 才是注册时验证过的那个，绝不出现在这里）；无公钥或公钥未含邮箱时为 []",
+                        "en-us": "E-mail addresses claimed by the user IDs of the PGP public key (asserted by the key itself — whether to trust them is the VERIFIER's call, see the fingerprint and signature counts; the account `email` is the verified one and never appears here); [] when there is no key or the key carries none"
+                    }
+                },
+                "pgpPublicKey": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "descriptions": {
+                        "zh-cn": "PGP 公钥（armored，仅公钥）；未设置为 null。请求方须已通过 visibility.profile 门控（本人/管理员始终可见）",
+                        "en-us": "PGP public key (armored, public only); null when unset. Only returned to callers already allowed by the visibility.profile gate (self/admin always)"
+                    }
+                },
+                "displayEmail": {
+                    "type": "string",
+                    "descriptions": {
+                        "zh-cn": "页面上显示的那一个邮箱，按顺序取第一个可用：① PGP 主用户 ID 里的地址 ② 账号邮箱（用户可在资料可见性里关掉，默认开启）③ 占位串 `*@*.*`（三者都没有时，绝不返回空串）",
+                        "en-us": "The single address a page prints — first available wins: (1) the address in the PGP primary user ID, (2) the account email (owner may switch this off under profile visibility; ON by default), (3) the literal `*@*.*` placeholder when neither exists (never an empty string)"
+                    }
+                },
+                "pgpFingerprint": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "descriptions": {
+                        "zh-cn": "主密钥指纹（大写十六进制）；无公钥或无法解读（如 v3 旧格式）为 null。核对指纹是判断密钥归属的正统方式",
+                        "en-us": "Primary key fingerprint (uppercase hex); null without a key or when it cannot be read (e.g. the deprecated v3 format). Comparing fingerprints is how key ownership is really checked"
+                    }
+                },
+                "pgpAlgorithm": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "descriptions": {
+                        "zh-cn": "算法与强度（如 \"RSA 4096\" / \"Ed25519\" / \"ECDSA P-256\"）；无法判定时为 null",
+                        "en-us": "Algorithm and strength (e.g. \"RSA 4096\" / \"Ed25519\" / \"ECDSA P-256\"); null when undecidable"
+                    }
+                },
+                "pgpCreatedAt": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "descriptions": {
+                        "zh-cn": "密钥创建时间（UTC，YYYY-MM-DD HH:MM:SS）；无公钥为 null",
+                        "en-us": "Key creation time (UTC, YYYY-MM-DD HH:MM:SS); null without a key"
+                    }
+                },
+                "pgpSelfSignatures": {
+                    "type": "integer",
+                    "descriptions": {
+                        "zh-cn": "指向本密钥的自签名数（自签名把「用户身份」绑定到密钥材料上，是 UID 的最低证明）；无公钥为 0",
+                        "en-us": "Number of self-signatures on this key (a self-signature binds a user ID to the key material — the minimum any UID has); 0 without a key"
+                    }
+                },
+                "pgpThirdPartySignatures": {
+                    "type": "integer",
+                    "descriptions": {
+                        "zh-cn": "来自**其它密钥**的签名数（信任网的原始材料；本站不计算信任路径，也不下结论）；无公钥为 0",
+                        "en-us": "Signatures issued by OTHER keys (raw web-of-trust material; this site neither computes trust paths nor draws conclusions); 0 without a key"
+                    }
+                },
+                "pgpRevoked": {
+                    "type": "boolean",
+                    "descriptions": {
+                        "zh-cn": "公钥里是否带密钥撤销签名（0x20）；true 表示这把密钥已被其主人声明作废",
+                        "en-us": "Whether the key carries a key-revocation signature (0x20); true means the owner declared this key dead"
+                    }
+                }
+            },
+            "required": [
+                "username",
+                "fullName",
+                "avatar",
+                "role",
+                "lastSeenAt",
+                "emails",
+                "pgpPublicKey",
+                "displayEmail",
+                "pgpFingerprint",
+                "pgpAlgorithm",
+                "pgpCreatedAt",
+                "pgpSelfSignatures",
+                "pgpThirdPartySignatures",
+                "pgpRevoked"
+            ],
+            "additionalProperties": false
+        },
+        "UserProfileEnvelope": {
+            "type": "object",
+            "properties": {
+                "endpoint": {
+                    "type": "string",
+                    "description": "产生本次响应的端点模板（自描述）"
+                },
+                "apiVersion": {
+                    "type": "string"
+                },
+                "lang": {
+                    "type": "string",
+                    "description": "本次响应的语言"
+                },
+                "self": {
+                    "type": "boolean",
+                    "description": "当前访问者是否就是该用户（会话或 Bearer 身份）；true 时永远返回 200"
+                },
+                "user": {
+                    "type": "object",
+                    "properties": {
+                        "username": {
+                            "type": "string",
+                            "descriptions": {
+                                "zh-cn": "用户名（唯一标识）",
+                                "en-us": "Username (unique identifier)"
+                            }
+                        },
+                        "fullName": {
+                            "type": "string",
+                            "descriptions": {
+                                "zh-cn": "显示名；为空时回退为用户名",
+                                "en-us": "Display name; falls back to the username"
+                            }
+                        },
+                        "avatar": {
+                            "type": [
+                                "string",
+                                "null"
+                            ],
+                            "descriptions": {
+                                "zh-cn": "头像相对路径（站点根下，如 assets/uploads/avatars/u.png）；无头像为 null",
+                                "en-us": "Avatar path relative to the site root (e.g. assets/uploads/avatars/u.png); null when absent"
+                            }
+                        },
+                        "role": {
+                            "type": "string",
+                            "descriptions": {
+                                "zh-cn": "角色 admin|user|guest（只读，不回显权限位）",
+                                "en-us": "Role admin|user|guest (read-only; grants are never echoed)"
+                            }
+                        },
+                        "lastSeenAt": {
+                            "type": [
+                                "string",
+                                "null"
+                            ],
+                            "descriptions": {
+                                "zh-cn": "最近在线时间（UTC，YYYY-MM-DD HH:MM:SS）；从未在线为 null",
+                                "en-us": "Last seen timestamp (UTC, YYYY-MM-DD HH:MM:SS); null when never seen"
+                            }
+                        },
+                        "emails": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            },
+                            "descriptions": {
+                                "zh-cn": "PGP 公钥用户身份里自称的邮箱（公钥自己写的，是否可信由**验签者**判断：见指纹与签名数；账号 email 才是注册时验证过的那个，绝不出现在这里）；无公钥或公钥未含邮箱时为 []",
+                                "en-us": "E-mail addresses claimed by the user IDs of the PGP public key (asserted by the key itself — whether to trust them is the VERIFIER's call, see the fingerprint and signature counts; the account `email` is the verified one and never appears here); [] when there is no key or the key carries none"
+                            }
+                        },
+                        "pgpPublicKey": {
+                            "type": [
+                                "string",
+                                "null"
+                            ],
+                            "descriptions": {
+                                "zh-cn": "PGP 公钥（armored，仅公钥）；未设置为 null。请求方须已通过 visibility.profile 门控（本人/管理员始终可见）",
+                                "en-us": "PGP public key (armored, public only); null when unset. Only returned to callers already allowed by the visibility.profile gate (self/admin always)"
+                            }
+                        },
+                        "displayEmail": {
+                            "type": "string",
+                            "descriptions": {
+                                "zh-cn": "页面上显示的那一个邮箱，按顺序取第一个可用：① PGP 主用户 ID 里的地址 ② 账号邮箱（用户可在资料可见性里关掉，默认开启）③ 占位串 `*@*.*`（三者都没有时，绝不返回空串）",
+                                "en-us": "The single address a page prints — first available wins: (1) the address in the PGP primary user ID, (2) the account email (owner may switch this off under profile visibility; ON by default), (3) the literal `*@*.*` placeholder when neither exists (never an empty string)"
+                            }
+                        },
+                        "pgpFingerprint": {
+                            "type": [
+                                "string",
+                                "null"
+                            ],
+                            "descriptions": {
+                                "zh-cn": "主密钥指纹（大写十六进制）；无公钥或无法解读（如 v3 旧格式）为 null。核对指纹是判断密钥归属的正统方式",
+                                "en-us": "Primary key fingerprint (uppercase hex); null without a key or when it cannot be read (e.g. the deprecated v3 format). Comparing fingerprints is how key ownership is really checked"
+                            }
+                        },
+                        "pgpAlgorithm": {
+                            "type": [
+                                "string",
+                                "null"
+                            ],
+                            "descriptions": {
+                                "zh-cn": "算法与强度（如 \"RSA 4096\" / \"Ed25519\" / \"ECDSA P-256\"）；无法判定时为 null",
+                                "en-us": "Algorithm and strength (e.g. \"RSA 4096\" / \"Ed25519\" / \"ECDSA P-256\"); null when undecidable"
+                            }
+                        },
+                        "pgpCreatedAt": {
+                            "type": [
+                                "string",
+                                "null"
+                            ],
+                            "descriptions": {
+                                "zh-cn": "密钥创建时间（UTC，YYYY-MM-DD HH:MM:SS）；无公钥为 null",
+                                "en-us": "Key creation time (UTC, YYYY-MM-DD HH:MM:SS); null without a key"
+                            }
+                        },
+                        "pgpSelfSignatures": {
+                            "type": "integer",
+                            "descriptions": {
+                                "zh-cn": "指向本密钥的自签名数（自签名把「用户身份」绑定到密钥材料上，是 UID 的最低证明）；无公钥为 0",
+                                "en-us": "Number of self-signatures on this key (a self-signature binds a user ID to the key material — the minimum any UID has); 0 without a key"
+                            }
+                        },
+                        "pgpThirdPartySignatures": {
+                            "type": "integer",
+                            "descriptions": {
+                                "zh-cn": "来自**其它密钥**的签名数（信任网的原始材料；本站不计算信任路径，也不下结论）；无公钥为 0",
+                                "en-us": "Signatures issued by OTHER keys (raw web-of-trust material; this site neither computes trust paths nor draws conclusions); 0 without a key"
+                            }
+                        },
+                        "pgpRevoked": {
+                            "type": "boolean",
+                            "descriptions": {
+                                "zh-cn": "公钥里是否带密钥撤销签名（0x20）；true 表示这把密钥已被其主人声明作废",
+                                "en-us": "Whether the key carries a key-revocation signature (0x20); true means the owner declared this key dead"
+                            }
+                        }
+                    },
+                    "required": [
+                        "username",
+                        "fullName",
+                        "avatar",
+                        "role",
+                        "lastSeenAt",
+                        "emails",
+                        "pgpPublicKey",
+                        "displayEmail",
+                        "pgpFingerprint",
+                        "pgpAlgorithm",
+                        "pgpCreatedAt",
+                        "pgpSelfSignatures",
+                        "pgpThirdPartySignatures",
+                        "pgpRevoked"
+                    ],
+                    "additionalProperties": false
+                }
+            },
+            "required": [
+                "endpoint",
+                "apiVersion",
+                "lang",
+                "self",
+                "user"
+            ],
+            "additionalProperties": false
+        },
+        "UserSearchEnvelope": {
+            "type": "object",
+            "properties": {
+                "endpoint": {
+                    "type": "string",
+                    "description": "产生本次响应的端点模板（自描述）"
+                },
+                "apiVersion": {
+                    "type": "string"
+                },
+                "lang": {
+                    "type": "string",
+                    "description": "本次响应的语言"
+                },
+                "query": {
+                    "type": "string",
+                    "description": "实际用于匹配的查询串（已 trim）"
+                },
+                "total": {
+                    "type": "integer",
+                    "description": "过滤后（可见性 + 自身豁免）符合的总人数"
+                },
+                "count": {
+                    "type": "integer",
+                    "description": "本次返回的人数（受 limit 约束）"
+                },
+                "limit": {
+                    "type": "integer"
+                },
+                "offset": {
+                    "type": "integer"
+                },
+                "hasMore": {
+                    "type": "boolean"
+                },
+                "users": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "username": {
+                                "type": "string",
+                                "descriptions": {
+                                    "zh-cn": "用户名（唯一标识，用于资料页链接）",
+                                    "en-us": "Username (unique identifier; used for the profile link)"
+                                }
+                            },
+                            "fullName": {
+                                "type": "string",
+                                "descriptions": {
+                                    "zh-cn": "显示名；为空时回退为用户名",
+                                    "en-us": "Display name; falls back to the username"
+                                }
+                            },
+                            "avatar": {
+                                "type": [
+                                    "string",
+                                    "null"
+                                ],
+                                "descriptions": {
+                                    "zh-cn": "头像相对路径（站点根下）；无头像为 null",
+                                    "en-us": "Avatar path relative to the site root; null when absent"
+                                }
+                            },
+                            "role": {
+                                "type": "string",
+                                "descriptions": {
+                                    "zh-cn": "角色 admin|user|guest（只读，不回显权限位）",
+                                    "en-us": "Role admin|user|guest (read-only; grants are never echoed)"
+                                }
+                            },
+                            "emails": {
+                                "type": "array",
+                                "items": {
+                                    "type": "string"
+                                },
+                                "descriptions": {
+                                    "zh-cn": "PGP 公钥用户身份里自称的邮箱（未验证，不是账号邮箱）",
+                                    "en-us": "E-mail addresses claimed by the user IDs of the PGP public key (unverified; not the account e-mail)"
+                                }
+                            }
+                        },
+                        "required": [
+                            "username",
+                            "fullName",
+                            "avatar",
+                            "role",
+                            "emails"
+                        ],
+                        "additionalProperties": false
+                    },
+                    "description": "只含 username/fullName/avatar/role/emails —— 账号 email（注册验证过的那个）、权限位与凭据绝不回显；emails 是公钥里自称的未验证地址"
+                }
+            },
+            "required": [
+                "endpoint",
+                "apiVersion",
+                "lang",
+                "query",
+                "total",
+                "count",
+                "limit",
+                "offset",
+                "hasMore",
+                "users"
+            ],
+            "additionalProperties": false
+        },
+        "Error": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "object",
+                    "properties": {
+                        "code": {
+                            "type": "string",
+                            "enum": [
+                                "invalid_request",
+                                "unknown_language",
+                                "unknown_kind",
+                                "unknown_slug",
+                                "not_found",
+                                "method_not_allowed",
+                                "unauthenticated",
+                                "forbidden",
+                                "invalid_credentials",
+                                "login_locked",
+                                "rate_limited",
+                                "smtp_not_configured",
+                                "smtp_error",
+                                "invalid_code",
+                                "username_taken",
+                                "email_taken",
+                                "user_not_found",
+                                "conflict",
+                                "oauth_rate_limited"
+                            ],
+                            "description": "稳定错误码，用它分支"
+                        },
+                        "message": {
+                            "type": "string",
+                            "description": "可读提示；不保证稳定，不要用于判断逻辑。"
+                        },
+                        "param": {
+                            "type": "string",
+                            "description": "出错的查询参数名（若有）"
+                        },
+                        "value": {
+                            "type": "string",
+                            "description": "收到的值（若有）"
+                        }
+                    },
+                    "required": [
+                        "code",
+                        "message"
+                    ]
+                },
+                "docs": {
+                    "type": "string",
+                    "description": "格式说明入口"
+                }
+            },
+            "required": [
+                "error"
+            ]
+        },
+        "Types": {
+            "date": {
+                "type": "object",
+                "properties": {
+                    "accuracy": {
+                        "type": "string",
+                        "enum": [
+                            "year",
+                            "month",
+                            "day",
+                            "hour",
+                            "minute",
+                            "second"
+                        ]
+                    },
+                    "start": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "start"
+                ]
+            },
+            "place": {
+                "type": "object",
+                "properties": {
+                    "desc": {
+                        "type": "string"
+                    },
+                    "geo": {
+                        "type": "string"
+                    }
+                }
+            },
+            "links": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "name": {
+                            "type": "string"
+                        },
+                        "url": {
+                            "type": "string"
+                        }
+                    }
+                }
+            },
+            "images": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "url": {
+                            "type": "string"
+                        },
+                        "alt": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "errorCodes": {
+        "invalid_request": "查询参数非法（如 active=maybe、limit 超范围）。此前 v1 会静默忽略。",
+        "unknown_language": "{lang} 不在 site.json 的 languages 中。",
+        "unknown_kind": "类别不存在（如 /api/v2/{lang}/unknown.json）。",
+        "unknown_slug": "该类别下没有这个 slug。",
+        "not_found": "路由不存在。",
+        "method_not_allowed": "该路径不支持此方法。",
+        "unauthenticated": "需要登录会话或 Bearer 令牌（管理端 API）。",
+        "forbidden": "已登录/已携令牌，但缺少所需权限或作用域。",
+        "invalid_credentials": "用户名或密码错误。",
+        "login_locked": "连续失败 10 次，锁定 60 秒；error.retryAfter 为剩余秒数。",
+        "rate_limited": "全局限流（不分 IP/用户），error.retryAfter 为剩余秒数。两处：注册验证码任意 1 分钟内全站最多 5 次；/api/v2/auth/check-username 任意 1 分钟内全站最多 10 次（限流先于参数校验）。",
+        "smtp_not_configured": "SMTP 未配置，无法发送验证码（管理面板「设置」可配置）。",
+        "smtp_error": "SMTP 已配置但发送失败；本次不计入限流配额。",
+        "invalid_code": "注册验证码错误、已过期（10 分钟）或已被使用（单次有效）。",
+        "username_taken": "注册用户名已被占用。",
+        "email_taken": "该邮箱已注册过账号。",
+        "user_not_found": "用户不存在。只读资料端点 /api/v2/{lang}/user/{username}.json 对「不存在」与「visibility.profile 不允许当前访问者查看」返回完全相同的响应，因此该码不能用于枚举账号。",
+        "conflict": "操作与约束冲突（如不能删除自己、不能降低自己角色、至少保留一名管理员、用户类历史不可撤销、解绑唯一登录方式）。",
+        "oauth_rate_limited": "OAuth 回调 10 分钟窗口内无效 state 超过 10 次（按客户端 IP 计数）；有效 state 不受此限。浏览器回调以 HTML 呈现该码。"
+    },
+    "conventions": [
+        {
+            "语言": "v2 的 {lang} 在路径里，与静态版一致（v1 亦然）。站点页面则不用语言段，由 Cookie 决定。"
+        },
+        {
+            "分页": "集合端点用 limit/offset，返回 total/hasMore；未传参数时 limit 取默认 20，offset=0。"
+        },
+        {
+            "排序": "priority 升序（缺省 999），同 priority 按 slug 字典序；索引行含 priority 与 url，因此顺序对调用方可见。"
+        },
+        {
+            "翻译": "i18n 字段（x-i18n）在请求时按 {lang} 扁平化为标量，调用方不会见到 {\"zh-cn\": …} 包裹。"
+        },
+        {
+            "错误": "统一为 {\"error\":{\"code\",\"message\",…}}，用 code 分支，不要匹配 message。"
+        },
+        {
+            "缓存": "集合端点发送 Cache-Control: public, max-age=300 与 ETag；带 If-None-Match 可得 304。"
+        },
+        {
+            "CORS": "公开集合端点发送 Access-Control-Allow-Origin: *；取决于访问者身份的端点（用户资料、成员搜索）不发 CORS，并固定 Cache-Control: private, no-store。"
+        }
+    ]
+}

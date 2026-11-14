@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Spark TUI
+GenericName=Spark ORG Client
+Comment=Browse Spark ORG news, contacts and platforms in the terminal
+Exec=spark-tui
+Icon=spark-tui
+Terminal=true
+Categories=Network;News;
+Keywords=spark;news;terminal;tui;org;
+StartupNotify=false

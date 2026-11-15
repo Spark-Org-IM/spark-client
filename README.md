@@ -284,10 +284,10 @@ Flarum 2.x 的置顶 / 锁定 / 隐藏 / 重命名 / 标签通过
 项目是桌面 / 终端客户端，发布物是 `.deb`，不需要“目标服务器”做持续部署。
 推荐把 **GitHub Releases 当作分发 CDN**，CI 只负责构建、测试和上传产物：
 
-1. 在 GitHub 建一个公开仓库（例如 `Spark-Org/spark-client`）；
+1. 在 GitHub 建一个公开仓库（例如 `sparkorg/spark-client`）；
 2. 把当前自建 Git 作为开发源，增加 GitHub remote 并推送：
    ```bash
-   git remote add github git@github.com:Spark-Org/spark-client.git
+   git remote add github git@github.com:sparkorg/spark-client.git
    git push github dev-261110
    ```
 3. `.github/workflows/ci.yml` 会在 push / PR 时自动：

@@ -92,9 +92,21 @@ jobs:
           if-no-files-found: error
 
   windows:
-    name: windows-amd64
-    runs-on: windows-2022
-    timeout-minutes: 45
+    name: windows-${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-2022
+            arch: amd64
+            generator_arch: x64
+            triplet: x64-windows-static
+          - runner: windows-11-arm
+            arch: arm64
+            generator_arch: arm64
+            triplet: arm64-windows-static
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
     steps:
       - name: Check out
         uses: actions/checkout@v7
@@ -103,13 +115,13 @@ jobs:
         uses: actions/cache@v6
         with:
           path: build/vcpkg_installed
-          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}
+          key: vcpkg-${{ runner.os }}-${{ matrix.arch }}-${{ hashFiles('vcpkg.json') }}
 
       - name: Cache FTXUI source (fallback build)
         uses: actions/cache@v6
         with:
           path: build/_deps
-          key: ftxui-${{ runner.os }}-amd64-v6.1.9
+          key: ftxui-${{ runner.os }}-${{ matrix.arch }}-v6.1.9
 
       - name: Configure
         shell: pwsh
@@ -122,9 +134,9 @@ jobs:
           }
           $args = @(
             '-S', '.', '-B', 'build',
-            '-G', 'Visual Studio 17 2022', '-A', 'x64',
+            '-A', '${{ matrix.generator_arch }}',
             "-DCMAKE_TOOLCHAIN_FILE=$vcpkg/scripts/buildsystems/vcpkg.cmake",
-            '-DVCPKG_TARGET_TRIPLET=x64-windows-static',
+            '-DVCPKG_TARGET_TRIPLET=${{ matrix.triplet }}',
             '-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded',
             '-DCMAKE_BUILD_TYPE=Release'
           )
@@ -151,24 +163,24 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $version = (Select-String -Path build/CMakeCache.txt -Pattern '^SPARK_TUI_PROJECT_VERSION:STRING=(.+)$').Matches.Groups[1].Value
-          $name = "spark-tui-$version-windows-amd64"
+          $name = "spark-tui-$version-windows-${{ matrix.arch }}"
           $stage = "dist/$name"
           New-Item -ItemType Directory -Force -Path $stage | Out-Null
           Copy-Item build/Release/spark-tui.exe $stage
-          Copy-Item README.md, LICENSE $stage
+          Copy-Item -Path README.md,LICENSE -Destination $stage
           Copy-Item docs/config.example.toml $stage
-          $zip = "build/spark-tui_${version}_windows-amd64.zip"
+          $zip = "build/spark-tui_${version}_windows-${{ matrix.arch }}.zip"
           Compress-Archive -Path $stage -DestinationPath $zip -Force
           $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
-          "$hash  $(Split-Path $zip -Leaf)" | Out-File -Encoding ascii "build/SHA256SUMS-windows-amd64"
+          "$hash  $(Split-Path $zip -Leaf)" | Out-File -Encoding ascii "build/SHA256SUMS-windows-${{ matrix.arch }}"
 
       - name: Upload Windows package
         uses: actions/upload-artifact@v7
         with:
-          name: spark-tui-windows-amd64
+          name: spark-tui-windows-${{ matrix.arch }}
           path: |
             build/*.zip
-            build/SHA256SUMS-windows-amd64
+            build/SHA256SUMS-windows-${{ matrix.arch }}
           if-no-files-found: error
 
   release:

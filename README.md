@@ -319,16 +319,9 @@ GitHub Actions 对公开仓库的标准 Linux runner **不计分钟数**；私�
 > “Read and write permissions” 即可；workflow 本身已经声明了
 > `contents: write`。
 
-如果国内访问 GitHub Actions / Releases 较慢，可以把仓库镜像到
-[jihulab.com](https://jihulab.com)，使用仓库内的 `.gitlab-ci.yml`：
-
-- 极狐 GitLab 公开项目共享 runner 额度约为每月 50,000 分钟；
-- 私有项目约为每月 400 分钟；
-- 流水线使用 `debian:trixie` 镜像和系统 `libftxui-dev`，产物在
-  pipeline 的 artifact 中保留 30 天。
-
-这是免费额度，不是“无限永久免费”；但对这个项目每月几十次构建绰绰有余。
-GitHub 作为主 CI，JihuLab 作为国内快速镜像 / 备用 CI 即可。
+GitHub Actions 是唯一的 CI。极狐 GitLab 如果只作为国内镜像，就不要放
+`.gitlab-ci.yml`，否则它的共享 runner 会重复跑同一套构建；之前已经因为
+`job_execution_timeout` 失败过一次，所以仓库里不再保留 GitLab CI 配置。
 
 自建 Gitea 只做代码托管。仓库里的 `.gitea/workflows/README.md` 会让
 Gitea 忽略 `.github/workflows`，避免在没有 runner 时出现

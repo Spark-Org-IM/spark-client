@@ -297,8 +297,8 @@ Flarum 2.x 的置顶 / 锁定 / 隐藏 / 重命名 / 标签通过
    - 上传为 Actions artifact（保留 90 天）。
 4. 发布版本只需要推 tag：
    ```bash
-   git tag v0.2.0-beta.1
-   git push github v0.2.0-beta.1
+   git tag v0.2.0
+   git push github v0.2.0
    ```
    同一个 workflow 会创建 GitHub Release，并附上 `.deb` 和校验和。
 5. 用户从 Release 页面下载后校验并安装：
@@ -307,9 +307,8 @@ Flarum 2.x 的置顶 / 锁定 / 隐藏 / 重命名 / 标签通过
    sudo apt install ./spark-tui_0.2.0_amd64.deb
    ```
 
-测试版 tag 使用 `v0.2.0-beta.1` 这类格式，workflow 会标记为 pre-release，
-`.deb` 版本写成 `0.2.0~beta.1`，不会覆盖稳定版。返回稳定版时推送
-`v0.2.0` 即可。
+0.x 阶段不使用 beta 后缀：重要测试节点直接打 `v0.2.0`，日常测试不推
+tag，直接使用 Actions artifact 即可。
 
 GitHub Actions 对公开仓库的标准 Linux runner **不计分钟数**；私有仓库
 免费额度是每月 2,000 分钟。当前项目一次完整构建通常几分钟，公开仓库
@@ -330,6 +329,11 @@ GitHub Actions 对公开仓库的标准 Linux runner **不计分钟数**；私�
 
 这是免费额度，不是“无限永久免费”；但对这个项目每月几十次构建绰绰有余。
 GitHub 作为主 CI，JihuLab 作为国内快速镜像 / 备用 CI 即可。
+
+自建 Gitea 只做代码托管。仓库里的 `.gitea/workflows/README.md` 会让
+Gitea 忽略 `.github/workflows`，避免在没有 runner 时出现
+`Waiting to run` 队列；如果仍然排队，到仓库设置关闭 Actions 单元并取消
+旧任务。
 
 > 如果以后需要 `apt upgrade` 自动更新，可以在 GitHub Pages 上放一个
 > 用 `reprepro` / `aptly` 生成的静态 APT 仓库；当前阶段用 Releases +

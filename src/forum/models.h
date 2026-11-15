@@ -37,10 +37,17 @@ struct ForumDiscussion {
   std::string author;
   std::string firstPostId;
   std::vector<std::string> tagNames;
+  std::vector<std::string> tagSlugs;
   int commentCount = 0;
   bool sticky = false;
   bool locked = false;
   bool approved = true;
+  bool canSticky = false;
+  bool canLock = false;
+  bool canHide = false;
+  bool canDelete = false;
+  bool canRename = false;
+  bool canTag = false;
 };
 
 struct ForumPost {
@@ -77,6 +84,7 @@ ForumPage ParseForumDiscussions(const nlohmann::json& json);
 ForumThread ParseForumThread(const nlohmann::json& json);
 ForumUser ParseForumUser(const nlohmann::json& json);
 ForumAuth ParseForumAuth(const nlohmann::json& json);
+ForumTag ParseForumTag(const nlohmann::json& json);
 
 // Compact author label: displayName, then username.
 std::string ForumDisplayName(const ForumUser& user);

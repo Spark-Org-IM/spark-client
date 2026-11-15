@@ -203,6 +203,76 @@ Result<nlohmann::json> ForumClient::PostJson(const std::string& path,
   return HandleResponse(res->status, res->body);
 }
 
+Result<nlohmann::json> ForumClient::PatchJson(const std::string& path,
+                                              const nlohmann::json& body) {
+  std::string origin;
+  std::string prefix;
+  std::string token;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    origin = schemeHostPort_;
+    prefix = prefix_;
+    token = token_;
+  }
+
+  httplib::Client cli(origin);
+  cli.set_connection_timeout(5, 0);
+  cli.set_read_timeout(20, 0);
+  cli.set_write_timeout(20, 0);
+  cli.set_follow_location(true);
+  cli.enable_server_certificate_verification(!insecure_);
+
+  httplib::Headers headers = {
+      {"Accept", "application/vnd.api+json"},
+      {"User-Agent", "spark-tui/" SPARK_TUI_VERSION},
+  };
+  if (!token.empty()) {
+    headers.emplace("Authorization", "Token " + token);
+  }
+
+  const std::string full = prefix + path;
+  auto res = cli.Patch(full.c_str(), headers, body.dump(),
+                       "application/vnd.api+json");
+  if (!res) {
+    return Result<nlohmann::json>::Err(NetworkError(res.error()));
+  }
+  return HandleResponse(res->status, res->body);
+}
+
+Result<nlohmann::json> ForumClient::DeleteJson(const std::string& path) {
+  std::string origin;
+  std::string prefix;
+  std::string token;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    origin = schemeHostPort_;
+    prefix = prefix_;
+    token = token_;
+  }
+
+  httplib::Client cli(origin);
+  cli.set_connection_timeout(5, 0);
+  cli.set_read_timeout(20, 0);
+  cli.set_write_timeout(20, 0);
+  cli.set_follow_location(true);
+  cli.enable_server_certificate_verification(!insecure_);
+
+  httplib::Headers headers = {
+      {"Accept", "application/vnd.api+json"},
+      {"User-Agent", "spark-tui/" SPARK_TUI_VERSION},
+  };
+  if (!token.empty()) {
+    headers.emplace("Authorization", "Token " + token);
+  }
+
+  const std::string full = prefix + path;
+  auto res = cli.Delete(full.c_str(), headers);
+  if (!res) {
+    return Result<nlohmann::json>::Err(NetworkError(res.error()));
+  }
+  return HandleResponse(res->status, res->body);
+}
+
 Result<ForumPage> ForumClient::Discussions(int limit, const std::string& next) {
   Query query;
   const std::string path = PathFor(next);
@@ -246,6 +316,109 @@ Result<ForumUser> ForumClient::User(const std::string& id) {
   } catch (const std::exception& e) {
     return Result<ForumUser>::Err({0, "parse_error", e.what()});
   }
+}
+
+Result<nlohmann::json> ForumClient::UpdateDiscussion(
+    const std::string& id, const nlohmann::json& attributes) {
+  nlohmann::json body = {
+      {"data",
+       {
+           {"type", "discussions"},
+           {"id", id},
+           {"attributes", attributes},
+       }},
+  };
+  return PatchJson("/api/discussions/" + UrlEncode(id), body);
+}
+
+Result<nlohmann::json> ForumClient::DeleteDiscussion(const std::string& id) {
+  return DeleteJson("/api/discussions/" + UrlEncode(id));
+}
+
+Result<std::vector<ForumTag>> ForumClient::Tags() {
+  auto r = GetJson("/api/tags");
+  if (!r.ok) return Result<std::vector<ForumTag>>::Err(r.error);
+  try {
+    std::vector<ForumTag> tags;
+    if (r.value.is_object() && r.value.contains("data") &&
+        r.value.at("data").is_array()) {
+      for (const auto& entry : r.value.at("data")) {
+        if (entry.is_object()) tags.push_back(ParseForumTag(entry));
+      }
+    }
+    return Result<std::vector<ForumTag>>::Ok(std::move(tags));
+  } catch (const std::exception& e) {
+    return Result<std::vector<ForumTag>>::Err({0, "parse_error", e.what()});
+  }
+}
+
+Result<nlohmann::json> ForumClient::SetDiscussionTags(
+    const std::string& id, const std::vector<std::string>& tagIds) {
+  nlohmann::json tags = nlohmann::json::array();
+  for (const auto& tag_id : tagIds) {
+    tags.push_back({{"type", "tags"}, {"id", tag_id}});
+  }
+  nlohmann::json body = {
+      {"data",
+       {
+           {"type", "discussions"},
+           {"id", id},
+           {"relationships", {{"tags", {{"data", tags}}}}},
+       }},
+  };
+  return PatchJson("/api/discussions/" + UrlEncode(id), body);
+}
+
+Result<nlohmann::json> ForumClient::Reply(const std::string& discussionId,
+                                          const std::string& content) {
+  nlohmann::json body = {
+      {"data",
+       {
+           {"type", "posts"},
+           {"attributes", {{"content", content}}},
+           {"relationships",
+            {{"discussion",
+              {{"data", {{"type", "discussions"}, {"id", discussionId}}}}}}},
+       }},
+  };
+  return PostJson("/api/posts", body);
+}
+
+Result<nlohmann::json> ForumClient::CreateDiscussion(
+    const std::string& title, const std::string& content,
+    const std::vector<std::string>& tagIds) {
+  nlohmann::json tags = nlohmann::json::array();
+  for (const auto& tag_id : tagIds) {
+    tags.push_back({{"type", "tags"}, {"id", tag_id}});
+  }
+  nlohmann::json body = {
+      {"data",
+       {
+           {"type", "discussions"},
+           {"attributes", {{"title", title}, {"content", content}}},
+           {"relationships", {{"tags", {{"data", tags}}}}},
+       }},
+  };
+  return PostJson("/api/discussions", body);
+}
+
+Result<nlohmann::json> ForumClient::RawRequest(const std::string& method,
+                                               const std::string& path,
+                                               const nlohmann::json& body) {
+  std::string normalized = ToLower(Trim(method));
+  std::string target = Trim(path);
+  if (target.empty()) {
+    return Result<nlohmann::json>::Err({0, "invalid_path", "路径不能为空"});
+  }
+  target = PathFor(target);
+  if (!target.empty() && target.front() != '/') target = "/" + target;
+
+  if (normalized == "get") return GetJson(target);
+  if (normalized == "post") return PostJson(target, body);
+  if (normalized == "patch") return PatchJson(target, body);
+  if (normalized == "delete") return DeleteJson(target);
+  return Result<nlohmann::json>::Err(
+      {0, "invalid_method", "仅支持 GET / POST / PATCH / DELETE"});
 }
 
 Result<ForumAuth> ForumClient::Login(const std::string& identification,

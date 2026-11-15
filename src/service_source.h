@@ -40,8 +40,10 @@ struct SyncOutcome {
   bool statusChanged = false;
   bool forumChanged = false;
   bool mainHeld = false;
+  bool mainRejected = false;
   bool statusHeld = false;
-  bool signedOut = false;
+  bool forumHeld = false;
+  bool forumRejected = false;
   std::string mainUrl;
   std::string statusUrl;
   std::string forumUrl;
@@ -51,10 +53,11 @@ struct SyncOutcome {
 // manual override > last synced value > built-in default.
 //
 // Automatic sync never overwrites a manual override; it only refreshes the
-// cached auto value. If the effective main server changes while a token is
-// stored, the token is probed against the new server first:
+// cached auto value. If the effective main or forum server changes while a
+// token is stored, the token is probed against the new server first:
 //  - accepted    -> apply the new address and keep the login;
-//  - rejected    -> revoke on the old server, clear the local token, apply;
+//  - rejected    -> hold the old address; the user must sign out from the
+//                   source-review flow before switching;
 //  - unreachable -> hold the old address and retry on the next sync.
 SyncOutcome SyncInstanceConfig(Config& cfg);
 

@@ -1,5 +1,11 @@
 cmake_minimum_required(VERSION 3.20)
-project(spark-tui VERSION 0.1.0 LANGUAGES CXX)
+
+# CI stamps these from the release tag. The project version must stay numeric;
+# the package version may use Debian's tilde suffix (`0.2.0~beta.1`).
+set(SPARK_TUI_PROJECT_VERSION "0.2.0" CACHE STRING "spark-tui version")
+set(SPARK_TUI_PACKAGE_VERSION "${SPARK_TUI_PROJECT_VERSION}"
+    CACHE STRING "spark-tui package version")
+project(spark-tui VERSION ${SPARK_TUI_PROJECT_VERSION} LANGUAGES CXX)
 
 # ---------------------------------------------------------------------------
 # Language / build defaults
@@ -168,7 +174,7 @@ set(CPACK_PACKAGE_NAME            "spark-tui")
 set(CPACK_PACKAGE_VENDOR          "Spark ORG")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY
     "Terminal client for Spark ORG (news / contact / platform / forum)")
-set(CPACK_PACKAGE_VERSION         "${PROJECT_VERSION}")
+set(CPACK_PACKAGE_VERSION         "${SPARK_TUI_PACKAGE_VERSION}")
 set(CPACK_PACKAGE_CONTACT         "Jianyin Li <jianyin@sparkorg.dpdns.org>")
 set(CPACK_RESOURCE_FILE_LICENSE   "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
 set(CPACK_DEBIAN_PACKAGE_SECTION  "utils")

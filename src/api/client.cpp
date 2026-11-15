@@ -240,6 +240,43 @@ Result<nlohmann::json> ApiClient::HomeNews() {
   return GetJson("/api/v2/home-news.json");
 }
 
+Result<nlohmann::json> ApiClient::HomeNewsAdd(const std::string& slug) {
+  return PostJson("/api/v2/home-news/add", nlohmann::json{{"slug", slug}});
+}
+
+Result<nlohmann::json> ApiClient::HomeNewsRemove(const std::string& slug) {
+  return PostJson("/api/v2/home-news/remove", nlohmann::json{{"slug", slug}});
+}
+
+Result<nlohmann::json> ApiClient::HomeNewsReorder(
+    const std::vector<std::string>& picks) {
+  return PostJson("/api/v2/home-news/reorder", nlohmann::json{{"picks", picks}});
+}
+
+Result<nlohmann::json> ApiClient::SaveNews(const std::string& slug,
+                                           const nlohmann::json& data) {
+  return PostJson("/api/v2/news/save",
+                  nlohmann::json{{"slug", slug}, {"data", data}});
+}
+
+Result<nlohmann::json> ApiClient::DeleteNews(const std::string& slug) {
+  return PostJson("/api/v2/news/" + UrlEncode(slug) + "/delete",
+                  nlohmann::json::object());
+}
+
+Result<nlohmann::json> ApiClient::History(const std::string& entity,
+                                          const std::string& slug) {
+  Query query;
+  query.emplace_back("entity", entity);
+  query.emplace_back("slug", slug);
+  return GetJson("/api/v2/history.json", query);
+}
+
+Result<nlohmann::json> ApiClient::RevertHistory(const std::string& id) {
+  return PostJson("/api/v2/history/" + UrlEncode(id) + "/revert",
+                  nlohmann::json::object());
+}
+
 Result<nlohmann::json> ApiClient::Me() { return GetJson("/api/v2/me.json"); }
 
 Result<DeviceCode> ApiClient::StartDeviceCode(

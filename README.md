@@ -8,6 +8,12 @@ Spark ORG API v2 的终端客户端，基于 [FTXUI](https://github.com/ArthurSo
 - 启动主页：站点名称与最近新闻预览；服务地址等技术信息收进设置
 - 浏览新闻 / 联系 / 平台（分页、详情、搜索）
 - 论坛只读浏览：主题列表、主题详情 / 回复、标签、分页
+- 管理工具：
+  - 主页置顶：候选新闻、置顶 / 取消、顺序调整（需要 `news.edit`）
+  - 新闻：新建 / 编辑底层 JSON / 删除 / 历史回滚（需要 `news.edit`）
+  - 论坛主题：置顶、锁定、隐藏、重命名、删除、标签编辑
+  - 论坛内容：回复主题、发新主题
+  - 需要管理权限；富文本 / JSON 编辑通过 `$VISUAL` / `$EDITOR` 完成
 - 详情默认渲染为可读内容；按 `x` 临时切换底层 JSON
 - 新闻日期按接口声明的精度显示（年 / 月 / 日 / 时 / 分 / 秒）
 - 界面语言：跟随系统 / 中文 / English（设置页持久化；`l` 临时切换不保存）
@@ -136,9 +142,9 @@ display_name = 'Jianyin Li'
 生效顺序：**手动覆盖 → 上次同步值 → 内置默认**。
 
 - 自动同步只更新 `auto_main` / `auto_status` / `auto_forum`，不会覆盖手动值；
-- 如果主服务器发生变化且本地已登录，客户端会先用现有令牌请求新服务器
-  的 `/api/v2/me.json`：接受则保留登录，401/403 则吊销旧令牌并登出，
-  网络不可达则暂缓切换并保留旧地址；
+- 自动同步时如果主服务器或论坛服务器发生变化，客户端会先用现有令牌
+  探测新地址：接受则切换；被拒绝或不可达则保留旧地址，不会静默清除
+  登录。需要切换时请到设置页手动确认，并先退出失效的登录；
 - 状态服务器目前没有对应的 API 客户端，只做缓存和展示。
 - 论坛服务器指向 Flarum 实例（`services.FORUM`）。论坛使用独立的
   Flarum 令牌，不复用 Spark ORG 的 `spark_…` 令牌；匿名即可只读浏览，
@@ -150,9 +156,23 @@ display_name = 'Jianyin Li'
 - `↑` `↓` / `j` `k`：选择设置条目
 - `Enter`：进入条目
 - 条目内 `Tab` / `↑` `↓`：切换字段
-- 条目内 `Enter`（或 `Ctrl-S`）：保存
+- 条目内 `Enter`（或 `Ctrl-S`）：核对变更
 - 条目内 `F5`（或 `Ctrl-R`）：立即同步服务源
 - `Esc`：返回上一级；设置首页 `Esc` / `q` 关闭
+
+按 `Enter` 后不会立即保存，而是进入「确认服务源变更」页面：
+
+1. 逐条列出旧值 → 新值（主服务器 / 状态服务器 / 论坛服务器 / 同步源）；
+2. 如果主服务器或论坛服务器发生变化，且本地已有对应令牌，自动用该令牌
+   请求新地址：Spark ORG 使用 `GET /api/v2/me.json`，论坛使用
+   `GET /api`；
+3. 令牌可用（或本地本来没有登录）时按 `Enter` 保存并应用；
+4. 令牌被拒绝时应用会被阻止，按 `O` 退出失效的登录，再按 `Enter`
+   保存；保存后会直接进入登录管理，提示重新登录；
+5. 新地址不可达时同样阻止应用，可修复网络后按 `r` 重新检查，或按
+   `Esc` 取消且不写入任何配置。
+
+取消（`Esc` / `q`）不会修改配置文件。
 
 设置首页第二项「详情显示底层数据」控制详情 / 我的页面的默认视图：
 
@@ -196,6 +216,10 @@ display_name = 'Jianyin Li'
 | `/` | 搜索 |
 | `l` | 临时切换语言（不保存） |
 | `s` | 设置（服务源 / 实例地址 / 底层数据 / 界面语言） |
+| `m` | 主页：管理置顶；新闻 / 论坛：管理选中条目 |
+| `a` | 新闻：新建；论坛主题：回复 |
+| `c` | 论坛：发新主题 |
+| `A` | 论坛 / 主题详情：论坛 API 工具 |
 | `x` | 详情 / 我的：渲染 ↔ 底层数据 |
 | `i` | 联系详情：导入联系人的 PGP 公钥 |
 | `L` | 登录菜单（Spark ORG 设备码 / 论坛账号） |
@@ -226,6 +250,90 @@ display_name = 'Jianyin Li'
    `Authorization: Token <flarum-token>`；
 4. 密码只用于本次换取令牌，不会写入配置；
 5. 论坛令牌与 Spark ORG 令牌完全独立，退出论坛不影响主站登录。
+
+## 管理工具
+
+管理入口是上下文相关的，不额外占用标签页：
+
+- 主页按 `m`：打开主页置顶管理。`Enter` / `Space` 置顶或取消，
+  `J` / `K` 调整置顶顺序，`r` 刷新候选列表，`Esc` 返回主页。
+  该功能使用 Spark ORG 令牌，需要 `news.edit` 权限。
+- 新闻列表按 `a`：新建新闻；按 `m`：编辑底层 JSON、查看历史并回滚、删除。
+  编辑内容会写入临时文件并调用 `$VISUAL` / `$EDITOR`（默认 `vi`）。
+- 论坛列表或主题详情按 `m`：打开论坛主题管理。根据论坛返回的
+  `canSticky` / `canLock` / `canHide` / `canTag` / `canRename` /
+  `canDelete` 显示可用操作；隐藏和删除需要 `y` 二次确认。
+- 论坛主题详情按 `a`：回复主题；论坛列表按 `c`：发新主题。
+  回复正文、发主题和标签编辑同样通过外部编辑器完成。
+- 新闻删除、历史回滚、论坛隐藏 / 删除都有二次确认。
+- 论坛列表或主题详情按 `A`：打开论坛 API 工具，直接调用 Flarum 扩展的
+  JSON:API。`Tab` 切换 GET / POST / PATCH / DELETE，`Enter`（或
+  `Ctrl-R`）发送，`Ctrl-E` 用外部编辑器修改 JSON 请求体，`Ctrl-P`
+  载入常用接口预设，`Ctrl-U` 清空路径；响应可用 `↑` `↓` / `PgUp`
+  `PgDn` 滚动。请求会带上论坛令牌（如果已登录），可用于排查扩展接口
+  或执行尚未内置的批量操作。
+
+权限不足时服务端返回 403，客户端会在界面/状态栏显示错误，不会假装成功。
+Flarum 2.x 的置顶 / 锁定 / 隐藏 / 重命名 / 标签通过
+`PATCH /api/discussions/{id}` 修改，删除使用
+`DELETE /api/discussions/{id}`，回复使用 `POST /api/posts`，
+发主题使用 `POST /api/discussions`。
+
+## CI 与发布（不需要自己的服务器）
+
+项目是桌面 / 终端客户端，发布物是 `.deb`，不需要“目标服务器”做持续部署。
+推荐把 **GitHub Releases 当作分发 CDN**，CI 只负责构建、测试和上传产物：
+
+1. 在 GitHub 建一个公开仓库（例如 `Spark-Org/spark-client`）；
+2. 把当前自建 Git 作为开发源，增加 GitHub remote 并推送：
+   ```bash
+   git remote add github git@github.com:Spark-Org/spark-client.git
+   git push github dev-261110
+   ```
+3. `.github/workflows/ci.yml` 会在 push / PR 时自动：
+   - 在 Ubuntu 24.04 上配置 CMake；
+   - 构建并运行单元测试；
+   - 生成 `.deb` 和 `SHA256SUMS`；
+   - 上传为 Actions artifact（保留 90 天）。
+4. 发布版本只需要推 tag：
+   ```bash
+   git tag v0.2.0-beta.1
+   git push github v0.2.0-beta.1
+   ```
+   同一个 workflow 会创建 GitHub Release，并附上 `.deb` 和校验和。
+5. 用户从 Release 页面下载后校验并安装：
+   ```bash
+   sha256sum -c SHA256SUMS
+   sudo apt install ./spark-tui_0.2.0_amd64.deb
+   ```
+
+测试版 tag 使用 `v0.2.0-beta.1` 这类格式，workflow 会标记为 pre-release，
+`.deb` 版本写成 `0.2.0~beta.1`，不会覆盖稳定版。返回稳定版时推送
+`v0.2.0` 即可。
+
+GitHub Actions 对公开仓库的标准 Linux runner **不计分钟数**；私有仓库
+免费额度是每月 2,000 分钟。当前项目一次完整构建通常几分钟，公开仓库
+完全够用。
+
+> 首次推送后如果 Release 步骤报 403，到仓库
+> `Settings → Actions → General → Workflow permissions`，选择
+> “Read and write permissions” 即可；workflow 本身已经声明了
+> `contents: write`。
+
+如果国内访问 GitHub Actions / Releases 较慢，可以把仓库镜像到
+[jihulab.com](https://jihulab.com)，使用仓库内的 `.gitlab-ci.yml`：
+
+- 极狐 GitLab 公开项目共享 runner 额度约为每月 50,000 分钟；
+- 私有项目约为每月 400 分钟；
+- 流水线使用 `debian:trixie` 镜像和系统 `libftxui-dev`，产物在
+  pipeline 的 artifact 中保留 30 天。
+
+这是免费额度，不是“无限永久免费”；但对这个项目每月几十次构建绰绰有余。
+GitHub 作为主 CI，JihuLab 作为国内快速镜像 / 备用 CI 即可。
+
+> 如果以后需要 `apt upgrade` 自动更新，可以在 GitHub Pages 上放一个
+> 用 `reprepro` / `aptly` 生成的静态 APT 仓库；当前阶段用 Releases +
+> 手动安装 `.deb` 更简单，也不需要维护服务器。
 
 ## 打包 .deb
 

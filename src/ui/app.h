@@ -2,6 +2,7 @@
 
 #include <array>
 #include <atomic>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -39,11 +40,26 @@ class App {
     Browse,
     Detail,
     ForumDetail,
+    HomeManage,   // home-news picks
+    ForumManage,  // Flarum moderation menu
+    ForumApi,     // raw JSON:API console for extension endpoints
+    NewsMenu,     // news edit / history / delete
+    NewsHistory,  // news revision list
     LoginMenu,    // choose Spark ORG or forum sign-in
     Login,        // Spark ORG device-code flow
     ForumLogin,   // Flarum username / password form
     Settings,          // settings menu
     InstanceSettings,  // service sources / instance addresses
+    SourceReview,      // review source changes + token probes
+  };
+
+  enum class ForumAction {
+    Sticky,
+    Lock,
+    Hide,
+    Tags,
+    Rename,
+    Delete,
   };
 
   struct ListState {
@@ -94,6 +110,101 @@ class App {
     int generation = 0;
   };
 
+  struct HomePickEntry {
+    std::string slug;
+    std::string title;
+    bool picked = false;
+  };
+
+  struct HomeManageState {
+    std::vector<HomePickEntry> items;
+    int selected = 0;
+    int max = 5;
+    bool loading = false;
+    bool busy = false;
+    std::string error;
+    std::string message;
+    int generation = 0;
+  };
+
+  struct ForumManageState {
+    ForumDiscussion discussion;
+    bool from_detail = false;
+    int selected = 0;
+    bool busy = false;
+    std::string message;
+    bool renaming = false;
+    std::string title;
+    std::size_t title_cursor = 0;
+    int confirm = 0;  // 0 = none, otherwise ForumAction index in the menu
+    int generation = 0;
+  };
+
+  struct NewsManageState {
+    ListItem item;
+    int selected = 0;
+    bool busy = false;
+    std::string message;
+    int confirm = 0;  // 1 = delete confirmation
+    int generation = 0;
+  };
+
+  struct HistoryEntry {
+    std::string id;
+    std::string op;
+    std::string actor;
+    std::string note;
+    std::string createdAt;
+    nlohmann::json payload;
+  };
+
+  struct NewsHistoryState {
+    std::string slug;
+    std::string title;
+    std::vector<HistoryEntry> entries;
+    int selected = 0;
+    bool loading = false;
+    std::string error;
+    std::string message;
+    int confirm = 0;
+    int generation = 0;
+  };
+
+  struct ForumApiPreset {
+    std::string name;
+    std::string method;
+    std::string path;
+    std::string body;
+  };
+
+  struct SourceReviewState {
+    Config pending;
+    std::vector<std::string> changes;
+    int spark_probe = 2;  // 2 = not needed, 1 ok, 0 rejected, -1 unreachable
+    int forum_probe = 2;
+    bool busy = false;
+    bool logged_out_spark = false;
+    bool logged_out_forum = false;
+    int generation = 0;
+    int base_generation = 0;
+    std::string message;
+  };
+
+  struct ForumApiState {
+    int method = 0;  // GET / POST / PATCH / DELETE
+    std::string path = "/api/discussions";
+    std::string body = "{}";
+    std::string response;
+    std::string status;
+    std::size_t cursor = path.size();
+    int scroll = 0;
+    bool busy = false;
+    bool from_detail = false;
+    bool show_presets = false;
+    int preset_selected = 0;
+    int generation = 0;
+  };
+
   struct SettingsState {
     int selected = 0;  // settings menu entry
     int field = 0;     // 0 sync, 1 main, 2 status, 3 forum
@@ -122,6 +233,37 @@ class App {
   void LoadMe();
   void LoadForum(bool append);
   void OpenForumDiscussion();
+  void OpenForumThread(const ForumDiscussion& discussion);
+  void OpenHomeManage();
+  void LoadHomeManage();
+  void ToggleHomePick();
+  void ReorderHomePicks(int direction);
+  void OpenForumManage(bool from_detail);
+  void RunForumAction(ForumAction action);
+  void SubmitForumRename();
+  std::vector<ForumAction> ForumActions() const;
+  void StartForumReply();
+  void StartForumCreate();
+  void StartForumTagEdit();
+  void OpenForumApi();
+  void SendForumApiRequest();
+  std::vector<ForumApiPreset> ForumApiPresets() const;
+  void StartSourceReview(Config pending, std::vector<std::string> changes);
+  void ProbeSourceReview();
+  void ApplySourceReview();
+  bool SourceReviewBlocked() const;
+  void OpenNewsMenu();
+  void StartNewsEdit(bool is_new);
+  void DeleteSelectedNews();
+  void StartNewsHistory();
+  void RevertSelectedHistory();
+  void OpenNewsEditor(const nlohmann::json& body, bool is_new);
+  std::optional<nlohmann::json> EditJsonDocument(
+      const nlohmann::json& initial, const std::string& prefix,
+      std::string& error);
+  std::optional<std::string> EditTextDocument(
+      const std::string& initial, const std::string& prefix,
+      std::string& error);
   void RunSearch();
   void OpenDetail();
   void StartLogin();
@@ -176,6 +318,12 @@ class App {
   ftxui::Element SearchView();
   ftxui::Element ForumView();
   ftxui::Element ForumDetailView();
+  ftxui::Element HomeManageView();
+  ftxui::Element ForumManageView();
+  ftxui::Element ForumApiView();
+  ftxui::Element SourceReviewView();
+  ftxui::Element NewsMenuView();
+  ftxui::Element NewsHistoryView();
   ftxui::Element MeView();
   ftxui::Element LoginMenuView();
   ftxui::Element LoginView();
@@ -187,6 +335,12 @@ class App {
   // Events ------------------------------------------------------------------
   bool HandleEvent(ftxui::Event event);
   bool HandleSearchKey(ftxui::Event event);
+  bool HandleHomeManageKey(ftxui::Event event);
+  bool HandleForumManageKey(ftxui::Event event);
+  bool HandleForumApiKey(ftxui::Event event);
+  bool HandleSourceReviewKey(ftxui::Event event);
+  bool HandleNewsMenuKey(ftxui::Event event);
+  bool HandleNewsHistoryKey(ftxui::Event event);
   bool HandleLoginMenuKey(ftxui::Event event);
   bool HandleForumLoginKey(ftxui::Event event);
   bool HandleSettingsMenuKey(ftxui::Event event);
@@ -237,6 +391,12 @@ class App {
 
   ForumState forum_;
   ForumThreadState forumThread_;
+  HomeManageState homeManage_;
+  ForumManageState forumManage_;
+  NewsManageState newsManage_;
+  NewsHistoryState newsHistory_;
+  ForumApiState forumApiTool_;
+  SourceReviewState sourceReview_;
 
   // Bumped whenever the user saves instance settings; a startup sync that
   // completes afterwards is discarded so it cannot overwrite newer values.

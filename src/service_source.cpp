@@ -8,6 +8,7 @@
 #include <nlohmann/json.hpp>
 
 #include "api/client.h"
+#include "forum/client.h"
 #include "util.h"
 
 namespace spark {
@@ -188,18 +189,12 @@ SyncOutcome SyncInstanceConfig(Config& cfg) {
         case 1:
           cfg.instance.autoMain = home;
           break;
-        case 0: {
-          // Best-effort revocation on the old server before dropping the
-          // local token.
-          if (!cfg.token.id.empty()) {
-            ApiClient old(oldMain, cfg.insecure, cfg.token.plaintext);
-            old.RevokeToken(cfg.token.id);
-          }
-          cfg.token = {};
-          cfg.instance.autoMain = home;
-          outcome.signedOut = true;
+        case 0:
+          // Never drop the session silently: keep the old address until the
+          // user signs out through the source-review flow.
+          outcome.mainHeld = true;
+          outcome.mainRejected = true;
           break;
-        }
         default:
           outcome.mainHeld = true;
           break;
@@ -214,9 +209,24 @@ SyncOutcome SyncInstanceConfig(Config& cfg) {
   }
 
   if (fetched.value.forum) {
-    // The forum has its own Flarum account/session; never reuse the Spark
-    // personal token. Only cache the target for the future forum client.
-    cfg.instance.autoForum = *fetched.value.forum;
+    // The forum has its own Flarum session; never reuse the Spark token.
+    const std::string forum = *fetched.value.forum;
+    if (cfg.instance.ForumIsManual() || forum == oldForum ||
+        cfg.forum.Empty()) {
+      // A manual forum override wins; refresh the fallback without probing.
+      cfg.instance.autoForum = forum;
+    } else {
+      ForumClient probe(forum, cfg.insecure, cfg.forum.token);
+      const auto result =
+          probe.RawRequest("GET", "/api", nlohmann::json::object());
+      if (result.ok) {
+        cfg.instance.autoForum = forum;
+      } else {
+        outcome.forumHeld = true;
+        outcome.forumRejected =
+            result.error.status == 401 || result.error.status == 403;
+      }
+    }
   }
 
   outcome.mainUrl = cfg.instance.EffectiveMain();

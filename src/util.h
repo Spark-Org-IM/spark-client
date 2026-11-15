@@ -62,6 +62,13 @@ std::string DefaultConfigPath();         // ConfigDir()/config.toml
 bool EnsureDirectory(const std::string& path);
 bool OpenUrl(const std::string& url);
 
+// Creates a private temporary file containing `content`; returns its path.
+std::optional<std::string> WriteTempFile(const std::string& prefix,
+                                         const std::string& content);
+std::string ReadTextFile(const std::string& path);
+// Opens `path` with $VISUAL / $EDITOR (default: vi) and waits for it.
+bool EditFile(const std::string& path);
+
 // Imports an ASCII-armored PGP public key with `gpg --import`. The key is
 // written to a private temporary file first, so no shell quoting is involved.
 // Returns false when gpg is missing or rejects the key.

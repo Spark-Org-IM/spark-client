@@ -165,6 +165,12 @@ ForumDiscussion ParseDiscussion(const nlohmann::json& entry,
     discussion.sticky = JsonBool(attributes, "isSticky", false);
     discussion.locked = JsonBool(attributes, "isLocked", false);
     discussion.approved = JsonBool(attributes, "isApproved", true);
+    discussion.canSticky = JsonBool(attributes, "canSticky", false);
+    discussion.canLock = JsonBool(attributes, "canLock", false);
+    discussion.canHide = JsonBool(attributes, "canHide", false);
+    discussion.canDelete = JsonBool(attributes, "canDelete", false);
+    discussion.canRename = JsonBool(attributes, "canRename", false);
+    discussion.canTag = JsonBool(attributes, "canTag", false);
   }
 
   discussion.author = AuthorName(included, entry, "lastPostedUser");
@@ -176,6 +182,7 @@ ForumDiscussion ParseDiscussion(const nlohmann::json& entry,
     if (const nlohmann::json* tag = Find(included, "tags", id)) {
       ForumTag parsed = ParseTag(*tag);
       if (!parsed.name.empty()) discussion.tagNames.push_back(parsed.name);
+      if (!parsed.slug.empty()) discussion.tagSlugs.push_back(parsed.slug);
     }
   }
   return discussion;
@@ -299,6 +306,8 @@ ForumAuth ParseForumAuth(const nlohmann::json& json) {
   }
   return auth;
 }
+
+ForumTag ParseForumTag(const nlohmann::json& json) { return ParseTag(json); }
 
 std::string ForumDisplayName(const ForumUser& user) {
   if (!user.displayName.empty()) return user.displayName;

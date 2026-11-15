@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdio>
+#include <ctime>
 #include <map>
 #include <string>
 #include <thread>
@@ -176,6 +178,187 @@ void App::LoadHome() {
   });
 }
 
+void App::OpenHomeManage() {
+  if (!LoggedIn()) {
+    SetStatus(T("管理主页需要先登录（按 L）",
+                "Sign in first to manage the home page (press L)"));
+    return;
+  }
+  homeManage_ = HomeManageState{};
+  mode_ = Mode::HomeManage;
+  LoadHomeManage();
+}
+
+void App::LoadHomeManage() {
+  ++homeManage_.generation;
+  const int generation = homeManage_.generation;
+  homeManage_.loading = true;
+  homeManage_.error.clear();
+
+  worker_.Submit([this, generation] {
+    auto result = api_.HomeNews();
+    worker_.Post([this, generation, result] {
+      if (generation != homeManage_.generation) return;
+      homeManage_.loading = false;
+      if (!result.ok) {
+        homeManage_.error = result.error.ToString();
+        if (result.error.status == 403) {
+          homeManage_.error = T("当前账号没有主页管理权限",
+                                "This account cannot manage the home page");
+        }
+        return;
+      }
+
+      const auto& data = result.value;
+      homeManage_.max = data.value("max", 5);
+      std::map<std::string, std::string> titles;
+      if (data.contains("items") && data.at("items").is_array()) {
+        for (const auto& item : data.at("items")) {
+          if (!item.is_object()) continue;
+          const std::string slug = item.value("slug", std::string{});
+          if (!slug.empty()) {
+            titles[slug] = item.value("title", slug);
+          }
+        }
+      }
+      if (data.contains("candidates") && data.at("candidates").is_array()) {
+        for (const auto& item : data.at("candidates")) {
+          if (!item.is_object()) continue;
+          const std::string slug = item.value("slug", std::string{});
+          if (slug.empty()) continue;
+          titles[slug] = item.value("title", slug);
+        }
+      } else {
+        homeManage_.error =
+            T("当前账号没有主页管理权限", "This account cannot manage the home page");
+        homeManage_.items.clear();
+        return;
+      }
+
+      std::vector<HomePickEntry> entries;
+      std::map<std::string, bool> picked;
+      if (data.contains("picks") && data.at("picks").is_array()) {
+        for (const auto& pick : data.at("picks")) {
+          if (!pick.is_string()) continue;
+          const std::string slug = pick.get<std::string>();
+          picked[slug] = true;
+          entries.push_back({slug, titles.count(slug) ? titles[slug] : slug, true});
+        }
+      }
+      if (data.contains("candidates") && data.at("candidates").is_array()) {
+        for (const auto& item : data.at("candidates")) {
+          if (!item.is_object()) continue;
+          const std::string slug = item.value("slug", std::string{});
+          if (slug.empty() || picked.count(slug)) continue;
+          entries.push_back({slug, item.value("title", slug), false});
+        }
+      }
+
+      homeManage_.items = std::move(entries);
+      if (homeManage_.selected >=
+          static_cast<int>(homeManage_.items.size())) {
+        homeManage_.selected =
+            std::max(0, static_cast<int>(homeManage_.items.size()) - 1);
+      }
+    });
+  });
+}
+
+void App::ToggleHomePick() {
+  if (homeManage_.busy || homeManage_.loading) return;
+  if (homeManage_.items.empty() || homeManage_.selected < 0 ||
+      homeManage_.selected >=
+          static_cast<int>(homeManage_.items.size())) {
+    return;
+  }
+
+  const HomePickEntry entry =
+      homeManage_.items[static_cast<std::size_t>(homeManage_.selected)];
+  int picked_count = 0;
+  for (const auto& item : homeManage_.items) {
+    if (item.picked) ++picked_count;
+  }
+  if (!entry.picked && picked_count >= homeManage_.max) {
+    homeManage_.message =
+        T("最多只能置顶 ", "At most ") + std::to_string(homeManage_.max) +
+        T(" 条新闻", " stories can be pinned");
+    return;
+  }
+
+  homeManage_.busy = true;
+  homeManage_.message = entry.picked
+                            ? T("正在取消置顶…", "Removing the pin…")
+                            : T("正在置顶…", "Pinning the story…");
+  const int generation = homeManage_.generation;
+  worker_.Submit([this, entry, generation] {
+    auto result = entry.picked ? api_.HomeNewsRemove(entry.slug)
+                               : api_.HomeNewsAdd(entry.slug);
+    worker_.Post([this, generation, result, entry] {
+      if (generation != homeManage_.generation) return;
+      homeManage_.busy = false;
+      if (!result.ok) {
+        homeManage_.message =
+            T("操作失败: ", "Operation failed: ") + result.error.ToString();
+        return;
+      }
+      homeManage_.message = entry.picked
+                                ? T("已取消置顶", "Pin removed")
+                                : T("已置顶", "Story pinned");
+      home_ = HomeState{};
+      LoadHomeManage();
+    });
+  });
+}
+
+void App::ReorderHomePicks(int direction) {
+  if (homeManage_.busy || homeManage_.loading) return;
+  const int selected = homeManage_.selected;
+  if (selected < 0 || selected >= static_cast<int>(homeManage_.items.size())) {
+    return;
+  }
+  if (!homeManage_.items[static_cast<std::size_t>(selected)].picked) {
+    homeManage_.message =
+        T("只有置顶新闻可以调整顺序", "Only pinned stories can be reordered");
+    return;
+  }
+
+  int picked_count = 0;
+  for (const auto& item : homeManage_.items) {
+    if (item.picked) ++picked_count;
+  }
+  const int target = selected + direction;
+  if (target < 0 || target >= picked_count) return;
+
+  std::swap(homeManage_.items[static_cast<std::size_t>(selected)],
+            homeManage_.items[static_cast<std::size_t>(target)]);
+  homeManage_.selected = target;
+
+  std::vector<std::string> picks;
+  for (int i = 0; i < picked_count; ++i) {
+    picks.push_back(homeManage_.items[static_cast<std::size_t>(i)].slug);
+  }
+
+  homeManage_.busy = true;
+  homeManage_.message = T("正在调整置顶顺序…", "Reordering pins…");
+  const int generation = homeManage_.generation;
+  worker_.Submit([this, picks, generation] {
+    auto result = api_.HomeNewsReorder(picks);
+    worker_.Post([this, generation, result] {
+      if (generation != homeManage_.generation) return;
+      homeManage_.busy = false;
+      if (!result.ok) {
+        homeManage_.message =
+            T("调整失败: ", "Reorder failed: ") + result.error.ToString();
+        LoadHomeManage();
+        return;
+      }
+      homeManage_.message = T("置顶顺序已更新", "Pin order updated");
+      home_ = HomeState{};
+      LoadHomeManage();
+    });
+  });
+}
+
 void App::LoadList(Tab tab, bool append) {
   if (tab == Tab::Search || tab == Tab::Me || tab == Tab::Home ||
       tab == Tab::Forum) {
@@ -317,9 +500,10 @@ void App::OpenForumDiscussion() {
       forum_.selected >= static_cast<int>(forum_.items.size())) {
     return;
   }
+  OpenForumThread(forum_.items[static_cast<std::size_t>(forum_.selected)]);
+}
 
-  const ForumDiscussion discussion =
-      forum_.items[static_cast<std::size_t>(forum_.selected)];
+void App::OpenForumThread(const ForumDiscussion& discussion) {
   mode_ = Mode::ForumDetail;
   ++forumThread_.generation;
   const int generation = forumThread_.generation;
@@ -350,6 +534,807 @@ void App::OpenForumDiscussion() {
         return;
       }
       forumThread_.thread = result.value;
+    });
+  });
+}
+
+std::vector<App::ForumAction> App::ForumActions() const {
+  std::vector<ForumAction> actions;
+  const ForumDiscussion& discussion = forumManage_.discussion;
+  if (discussion.canSticky) actions.push_back(ForumAction::Sticky);
+  if (discussion.canLock) actions.push_back(ForumAction::Lock);
+  if (discussion.canHide) actions.push_back(ForumAction::Hide);
+  if (discussion.canTag) actions.push_back(ForumAction::Tags);
+  if (discussion.canRename) actions.push_back(ForumAction::Rename);
+  if (discussion.canDelete) actions.push_back(ForumAction::Delete);
+  return actions;
+}
+
+void App::OpenForumManage(bool from_detail) {
+  if (!ForumLoggedIn()) {
+    SetStatus(T("管理论坛需要先登录论坛账号",
+                "Sign in to the forum to manage it"));
+    return;
+  }
+
+  const ForumDiscussion* discussion = nullptr;
+  if (from_detail) {
+    discussion = &forumThread_.thread.discussion;
+  } else if (!forum_.items.empty() && forum_.selected >= 0 &&
+             forum_.selected < static_cast<int>(forum_.items.size())) {
+    discussion = &forum_.items[static_cast<std::size_t>(forum_.selected)];
+  }
+  if (discussion == nullptr) return;
+
+  forumManage_ = ForumManageState{};
+  forumManage_.discussion = *discussion;
+  forumManage_.from_detail = from_detail;
+  mode_ = Mode::ForumManage;
+  status_.clear();
+}
+
+void App::RunForumAction(ForumAction action) {
+  if (forumManage_.busy) return;
+  forumManage_.confirm = 0;
+
+  if (action == ForumAction::Rename) {
+    forumManage_.renaming = true;
+    forumManage_.title = forumManage_.discussion.title;
+    forumManage_.title_cursor = forumManage_.title.size();
+    forumManage_.message.clear();
+    return;
+  }
+  if (action == ForumAction::Tags) {
+    StartForumTagEdit();
+    return;
+  }
+
+  forumManage_.busy = true;
+  const std::string id = forumManage_.discussion.id;
+  const bool from_detail = forumManage_.from_detail;
+  const int generation = ++forumManage_.generation;
+
+  if (action == ForumAction::Delete) {
+    forumManage_.message = T("正在删除主题…", "Deleting the discussion…");
+    worker_.Submit([this, id, generation, from_detail] {
+      auto result = forumApi_.DeleteDiscussion(id);
+      worker_.Post([this, generation, result, from_detail] {
+        if (generation != forumManage_.generation) return;
+        forumManage_.busy = false;
+        if (!result.ok) {
+          forumManage_.message =
+              T("删除失败: ", "Delete failed: ") + result.error.ToString();
+          return;
+        }
+        mode_ = Mode::Browse;
+        forum_ = ForumState{};
+        forumThread_ = ForumThreadState{};
+        LoadForum(false);
+        SetStatus(T("主题已删除", "Discussion deleted"));
+      });
+    });
+    return;
+  }
+
+  nlohmann::json attributes = nlohmann::json::object();
+  std::string success;
+  if (action == ForumAction::Sticky) {
+    const bool value = !forumManage_.discussion.sticky;
+    attributes["isSticky"] = value;
+    forumManage_.message =
+        value ? T("正在置顶…", "Pinning…") : T("正在取消置顶…", "Unpinning…");
+    success = value ? T("主题已置顶", "Discussion pinned")
+                    : T("已取消置顶", "Pin removed");
+  } else if (action == ForumAction::Lock) {
+    const bool value = !forumManage_.discussion.locked;
+    attributes["isLocked"] = value;
+    forumManage_.message =
+        value ? T("正在锁定…", "Locking…") : T("正在取消锁定…", "Unlocking…");
+    success = value ? T("主题已锁定", "Discussion locked")
+                    : T("已取消锁定", "Lock removed");
+  } else if (action == ForumAction::Hide) {
+    attributes["isHidden"] = true;
+    forumManage_.message = T("正在隐藏主题…", "Hiding the discussion…");
+    success = T("主题已隐藏", "Discussion hidden");
+  }
+
+  ForumDiscussion updated = forumManage_.discussion;
+  if (action == ForumAction::Sticky) updated.sticky = attributes["isSticky"];
+  if (action == ForumAction::Lock) updated.locked = attributes["isLocked"];
+
+  worker_.Submit([this, id, attributes, generation, success, updated,
+                  from_detail] {
+    auto result = forumApi_.UpdateDiscussion(id, attributes);
+    worker_.Post([this, generation, result, success, updated, from_detail] {
+      if (generation != forumManage_.generation) return;
+      forumManage_.busy = false;
+      if (!result.ok) {
+        forumManage_.message =
+            T("操作失败: ", "Operation failed: ") + result.error.ToString();
+        return;
+      }
+      mode_ = Mode::Browse;
+      forum_ = ForumState{};
+      forumThread_ = ForumThreadState{};
+      if (from_detail) {
+        OpenForumThread(updated);
+      } else {
+        LoadForum(false);
+      }
+      SetStatus(success);
+    });
+  });
+}
+
+void App::SubmitForumRename() {
+  if (forumManage_.busy) return;
+  const std::string title = Trim(forumManage_.title);
+  if (title.size() < 3 || title.size() > 80) {
+    forumManage_.message =
+        T("标题长度需要在 3–80 个字符之间",
+          "The title must be between 3 and 80 characters");
+    return;
+  }
+
+  forumManage_.busy = true;
+  const std::string id = forumManage_.discussion.id;
+  const bool from_detail = forumManage_.from_detail;
+  const int generation = ++forumManage_.generation;
+  ForumDiscussion updated = forumManage_.discussion;
+  updated.title = title;
+  forumManage_.message = T("正在保存标题…", "Saving the title…");
+
+  worker_.Submit([this, id, title, generation, updated, from_detail] {
+    auto result = forumApi_.UpdateDiscussion(id, {{"title", title}});
+    worker_.Post([this, generation, result, updated, from_detail] {
+      if (generation != forumManage_.generation) return;
+      forumManage_.busy = false;
+      if (!result.ok) {
+        forumManage_.message =
+            T("重命名失败: ", "Rename failed: ") + result.error.ToString();
+        return;
+      }
+      mode_ = Mode::Browse;
+      forumManage_.renaming = false;
+      forum_ = ForumState{};
+      forumThread_ = ForumThreadState{};
+      if (from_detail) {
+        OpenForumThread(updated);
+      } else {
+        LoadForum(false);
+      }
+      SetStatus(T("标题已更新", "Title updated"));
+    });
+  });
+}
+
+std::optional<nlohmann::json> App::EditJsonDocument(
+    const nlohmann::json& initial, const std::string& prefix,
+    std::string& error) {
+  error.clear();
+  const auto path =
+      WriteTempFile(prefix, initial.dump(2) + "\n");
+  if (!path) {
+    error = T("无法创建临时文件", "Could not create a temporary file");
+    return std::nullopt;
+  }
+
+  bool edited = false;
+  screen_.WithRestoredIO([&] { edited = EditFile(*path); })();
+  const std::string content = ReadTextFile(*path);
+  std::remove(path->c_str());
+  if (!edited) return std::nullopt;
+  if (Trim(content).empty()) {
+    error = T("内容为空，已取消", "Empty content; cancelled");
+    return std::nullopt;
+  }
+
+  nlohmann::json parsed = nlohmann::json::parse(content, nullptr, false);
+  if (parsed.is_discarded()) {
+    error = T("JSON 解析失败", "Invalid JSON");
+    return std::nullopt;
+  }
+  return parsed;
+}
+
+std::optional<std::string> App::EditTextDocument(
+    const std::string& initial, const std::string& prefix,
+    std::string& error) {
+  error.clear();
+  const auto path = WriteTempFile(prefix, initial);
+  if (!path) {
+    error = T("无法创建临时文件", "Could not create a temporary file");
+    return std::nullopt;
+  }
+
+  bool edited = false;
+  screen_.WithRestoredIO([&] { edited = EditFile(*path); })();
+  std::string content = ReadTextFile(*path);
+  std::remove(path->c_str());
+  if (!edited) return std::nullopt;
+  content = Trim(content);
+  if (content.empty()) {
+    error = T("内容为空，已取消", "Empty content; cancelled");
+    return std::nullopt;
+  }
+  return content;
+}
+
+std::vector<App::ForumApiPreset> App::ForumApiPresets() const {
+  return {
+      {T("论坛信息", "Forum info"), "GET", "/api", "{}"},
+      {T("主题列表", "Discussions"),
+       "GET", "/api/discussions?page[limit]=20&page[offset]=0", "{}"},
+      {T("标签", "Tags"), "GET", "/api/tags", "{}"},
+      {T("用户组", "Groups"), "GET", "/api/groups", "{}"},
+      {T("通知（需登录）", "Notifications (auth)"), "GET",
+       "/api/notifications", "{}"},
+      {T("回复主题", "Reply"),
+       "POST", "/api/posts",
+       R"({"data":{"type":"posts","attributes":{"content":"Markdown 正文"},"relationships":{"discussion":{"data":{"type":"discussions","id":"11"}}}}})"},
+      {T("发新主题", "New discussion"),
+       "POST", "/api/discussions",
+       R"({"data":{"type":"discussions","attributes":{"title":"标题","content":"Markdown 正文"},"relationships":{"tags":{"data":[{"type":"tags","id":"1"}]}}}})"},
+      {T("修改主题", "Update discussion"),
+       "PATCH", "/api/discussions/11",
+       R"({"data":{"type":"discussions","id":"11","attributes":{"isSticky":true}}})"},
+      {T("删除主题", "Delete discussion"), "DELETE",
+       "/api/discussions/11", "{}"},
+      {T("扩展接口示例", "Extension endpoint example"), "GET",
+       "/api/flags", "{}"},
+  };
+}
+
+void App::OpenForumApi() {
+  forumApiTool_ = ForumApiState{};
+  forumApiTool_.from_detail = mode_ == Mode::ForumDetail;
+  if (forumApiTool_.from_detail &&
+      !forumThread_.thread.discussion.id.empty()) {
+    forumApiTool_.path =
+        "/api/discussions/" + forumThread_.thread.discussion.id;
+  }
+  forumApiTool_.cursor = forumApiTool_.path.size();
+  mode_ = Mode::ForumApi;
+  status_.clear();
+}
+
+void App::SendForumApiRequest() {
+  if (forumApiTool_.busy) return;
+  static const char* kMethods[] = {"GET", "POST", "PATCH", "DELETE"};
+  const int index = std::clamp(forumApiTool_.method, 0, 3);
+  const std::string method = kMethods[index];
+  const std::string path = Trim(forumApiTool_.path);
+  if (path.empty()) {
+    forumApiTool_.status = T("路径不能为空", "Path must not be empty");
+    return;
+  }
+
+  nlohmann::json body = nlohmann::json::object();
+  if (method == "POST" || method == "PATCH") {
+    body = nlohmann::json::parse(forumApiTool_.body, nullptr, false);
+    if (body.is_discarded()) {
+      forumApiTool_.status =
+          T("请求体不是合法 JSON", "Request body is not valid JSON");
+      return;
+    }
+  }
+
+  forumApiTool_.busy = true;
+  forumApiTool_.status = T("请求中…", "Sending…");
+  forumApiTool_.response.clear();
+  forumApiTool_.scroll = 0;
+  const int generation = ++forumApiTool_.generation;
+  worker_.Submit([this, method, path, body, generation] {
+    auto result = forumApi_.RawRequest(method, path, body);
+    worker_.Post([this, generation, result, method, path] {
+      if (generation != forumApiTool_.generation) return;
+      forumApiTool_.busy = false;
+      if (!result.ok) {
+        forumApiTool_.status =
+            T("请求失败: ", "Request failed: ") + result.error.ToString();
+        forumApiTool_.response = result.error.ToString();
+        return;
+      }
+      forumApiTool_.status =
+          T("成功: ", "OK: ") + method + " " + path;
+      if (result.value.empty()) {
+        forumApiTool_.response = T("(空响应)", "(empty response)");
+      } else {
+        forumApiTool_.response = result.value.dump(2);
+      }
+      forumApiTool_.scroll = 0;
+    });
+  });
+}
+
+void App::OpenNewsMenu() {
+  if (!LoggedIn()) {
+    SetStatus(T("管理新闻需要先登录（按 L）",
+                "Sign in first to manage news (press L)"));
+    return;
+  }
+  ListState& list = ListFor(Tab::News);
+  if (list.items.empty() || list.selected < 0 ||
+      list.selected >= static_cast<int>(list.items.size())) {
+    SetStatus(T("没有选中的新闻", "No story selected"));
+    return;
+  }
+  newsManage_ = NewsManageState{};
+  newsManage_.item = list.items[static_cast<std::size_t>(list.selected)];
+  mode_ = Mode::NewsMenu;
+  status_.clear();
+}
+
+void App::StartNewsEdit(bool is_new) {
+  if (!LoggedIn()) {
+    SetStatus(T("管理新闻需要先登录（按 L）",
+                "Sign in first to manage news (press L)"));
+    return;
+  }
+
+  std::vector<std::string> languages = site_.languages;
+  if (languages.empty()) languages.push_back(lang_.empty() ? "zh-cn" : lang_);
+
+  if (is_new) {
+    nlohmann::json titles = nlohmann::json::object();
+    nlohmann::json descs = nlohmann::json::object();
+    for (const auto& language : languages) {
+      titles[language] = "";
+      descs[language] = "";
+    }
+
+    char date[32] = "2026-01-01";
+    const std::time_t now = std::time(nullptr);
+    std::tm local{};
+    if (localtime_r(&now, &local) != nullptr) {
+      std::strftime(date, sizeof(date), "%Y-%m-%d", &local);
+    }
+
+    nlohmann::json data = {
+        {"title", titles},
+        {"desc", descs},
+        {"date", {{"accuracy", "day"}, {"start", std::string(date) + " 00:00:00"}}},
+        {"priority", 999},
+        {"active", false},
+        {"place", nullptr},
+        {"images", nlohmann::json::array()},
+    };
+    nlohmann::json body = {{"slug", "new-news-slug"}, {"data", data}};
+    OpenNewsEditor(body, true);
+    return;
+  }
+
+  if (newsManage_.item.slug.empty()) return;
+  const std::string slug = newsManage_.item.slug;
+  newsManage_.busy = true;
+  newsManage_.message = T("正在读取新闻…", "Loading the story…");
+
+  worker_.Submit([this, slug, languages] {
+    nlohmann::json data = nlohmann::json::object();
+    nlohmann::json titles = nlohmann::json::object();
+    nlohmann::json descs = nlohmann::json::object();
+    bool any = false;
+    for (const auto& language : languages) {
+      auto result = api_.Item("news", language, slug);
+      if (!result.ok || !result.value.is_object()) continue;
+      if (!any) {
+        data = result.value;
+        data.erase("slug");
+        data.erase("url");
+        data.erase("title");
+        data.erase("desc");
+        any = true;
+      }
+      titles[language] = result.value.value("title", "");
+      descs[language] = result.value.value("desc", "");
+    }
+    worker_.Post([this, any, data, titles, descs, slug] {
+      newsManage_.busy = false;
+      if (!any) {
+        newsManage_.message =
+            T("读取新闻失败，请稍后重试", "Could not load the story, please retry");
+        SetStatus(newsManage_.message);
+        return;
+      }
+      nlohmann::json full = data;
+      full["title"] = titles;
+      full["desc"] = descs;
+      nlohmann::json body = {{"slug", slug}, {"data", full}};
+      OpenNewsEditor(body, false);
+    });
+  });
+}
+
+void App::OpenNewsEditor(const nlohmann::json& body, bool is_new) {
+  std::string error;
+  auto edited = EditJsonDocument(body, "spark-tui-news", error);
+  newsManage_.busy = false;
+  if (!edited) {
+    if (!error.empty()) {
+      newsManage_.message = error;
+      SetStatus(error);
+    }
+    return;
+  }
+  if (!edited->is_object() || !edited->contains("slug") ||
+      !edited->at("slug").is_string() || !edited->contains("data") ||
+      !edited->at("data").is_object()) {
+    newsManage_.message =
+        T("需要一个包含 slug 和 data 的 JSON 对象",
+          "Expected a JSON object with slug and data");
+    SetStatus(newsManage_.message);
+    return;
+  }
+
+  const std::string slug = Trim(edited->at("slug").get<std::string>());
+  const nlohmann::json data = edited->at("data");
+  if (slug.empty()) {
+    newsManage_.message = T("slug 不能为空", "slug must not be empty");
+    SetStatus(newsManage_.message);
+    return;
+  }
+
+  newsManage_.busy = true;
+  newsManage_.message = T("正在保存新闻…", "Saving the story…");
+  const int generation = ++newsManage_.generation;
+  worker_.Submit([this, slug, data, generation, is_new] {
+    auto result = api_.SaveNews(slug, data);
+    worker_.Post([this, generation, result, is_new] {
+      if (generation != newsManage_.generation) return;
+      newsManage_.busy = false;
+      if (!result.ok) {
+        newsManage_.message =
+            T("保存失败: ", "Save failed: ") + result.error.ToString();
+        SetStatus(newsManage_.message);
+        return;
+      }
+      lists_[0] = ListState{};
+      home_ = HomeState{};
+      mode_ = Mode::Browse;
+      if (tab_ == Tab::News) LoadList(Tab::News, false);
+      SetStatus(is_new ? T("新闻已创建", "Story created")
+                       : T("新闻已保存", "Story saved"));
+    });
+  });
+}
+
+void App::DeleteSelectedNews() {
+  if (newsManage_.item.slug.empty()) return;
+  newsManage_.confirm = 0;
+  newsManage_.busy = true;
+  newsManage_.message = T("正在删除新闻…", "Deleting the story…");
+  const std::string slug = newsManage_.item.slug;
+  const int generation = ++newsManage_.generation;
+  worker_.Submit([this, slug, generation] {
+    auto result = api_.DeleteNews(slug);
+    worker_.Post([this, generation, result, slug] {
+      if (generation != newsManage_.generation) return;
+      newsManage_.busy = false;
+      if (!result.ok) {
+        newsManage_.message =
+            T("删除失败: ", "Delete failed: ") + result.error.ToString();
+        SetStatus(newsManage_.message);
+        return;
+      }
+      ListState& list = lists_[0];
+      auto it = std::find_if(list.items.begin(), list.items.end(),
+                             [&](const ListItem& item) {
+                               return item.slug == slug;
+                             });
+      if (it != list.items.end()) {
+        list.items.erase(it);
+        list.total = std::max(0, list.total - 1);
+        if (list.selected >= static_cast<int>(list.items.size())) {
+          list.selected =
+              std::max(0, static_cast<int>(list.items.size()) - 1);
+        }
+      }
+      search_ = ListState{};
+      home_ = HomeState{};
+      mode_ = Mode::Browse;
+      SetStatus(T("新闻已删除", "Story deleted"));
+    });
+  });
+}
+
+void App::StartNewsHistory() {
+  if (newsManage_.item.slug.empty()) return;
+  newsHistory_ = NewsHistoryState{};
+  newsHistory_.slug = newsManage_.item.slug;
+  newsHistory_.title = newsManage_.item.title;
+  newsHistory_.loading = true;
+  mode_ = Mode::NewsHistory;
+  const int generation = ++newsHistory_.generation;
+  const std::string slug = newsHistory_.slug;
+
+  worker_.Submit([this, slug, generation] {
+    auto result = api_.History("news", slug);
+    worker_.Post([this, generation, result] {
+      if (generation != newsHistory_.generation) return;
+      newsHistory_.loading = false;
+      if (!result.ok) {
+        newsHistory_.error = result.error.ToString();
+        return;
+      }
+      newsHistory_.entries.clear();
+      if (result.value.is_object() && result.value.contains("ops") &&
+          result.value.at("ops").is_array()) {
+        for (const auto& op : result.value.at("ops")) {
+          if (!op.is_object()) continue;
+          HistoryEntry entry;
+          if (op.contains("id")) {
+            entry.id = op.at("id").is_string()
+                           ? op.at("id").get<std::string>()
+                           : op.at("id").dump();
+          }
+          auto read_string = [&](const char* key) {
+            if (!op.contains(key) || !op.at(key).is_string()) return std::string{};
+            return op.at(key).get<std::string>();
+          };
+          entry.op = read_string("op");
+          entry.actor = read_string("actor");
+          entry.note = read_string("note");
+          entry.createdAt = read_string("createdAt");
+          if (op.contains("payload")) entry.payload = op.at("payload");
+          newsHistory_.entries.push_back(std::move(entry));
+        }
+      }
+      if (newsHistory_.selected >=
+          static_cast<int>(newsHistory_.entries.size())) {
+        newsHistory_.selected =
+            std::max(0, static_cast<int>(newsHistory_.entries.size()) - 1);
+      }
+    });
+  });
+}
+
+void App::RevertSelectedHistory() {
+  if (newsHistory_.entries.empty() || newsHistory_.selected < 0 ||
+      newsHistory_.selected >=
+          static_cast<int>(newsHistory_.entries.size())) {
+    return;
+  }
+  newsHistory_.confirm = 0;
+  const std::string id =
+      newsHistory_.entries[static_cast<std::size_t>(newsHistory_.selected)].id;
+  if (id.empty()) return;
+  newsHistory_.message = T("正在回滚…", "Reverting…");
+  const int generation = ++newsHistory_.generation;
+  worker_.Submit([this, id, generation] {
+    auto result = api_.RevertHistory(id);
+    worker_.Post([this, generation, result] {
+      if (generation != newsHistory_.generation) return;
+      if (!result.ok) {
+        newsHistory_.message =
+            T("回滚失败: ", "Revert failed: ") + result.error.ToString();
+        return;
+      }
+      lists_[0] = ListState{};
+      home_ = HomeState{};
+      StartNewsHistory();
+      newsHistory_.message = T("已回滚", "Reverted");
+    });
+  });
+}
+
+void App::StartForumReply() {
+  if (!ForumLoggedIn()) {
+    SetStatus(T("回复需要先登录论坛", "Sign in to the forum to reply"));
+    return;
+  }
+  if (mode_ != Mode::ForumDetail) return;
+  const ForumDiscussion discussion = forumThread_.thread.discussion;
+  if (discussion.id.empty()) return;
+
+  std::string error;
+  auto content = EditTextDocument("", "spark-tui-reply", error);
+  if (!content) {
+    if (!error.empty()) SetStatus(error);
+    return;
+  }
+
+  forumThread_.loading = true;
+  SetStatus(T("正在发送回复…", "Sending the reply…"));
+  const int generation = ++forumThread_.generation;
+  worker_.Submit([this, discussion, content, generation] {
+    auto result = forumApi_.Reply(discussion.id, *content);
+    worker_.Post([this, generation, result, discussion] {
+      if (generation != forumThread_.generation) return;
+      forumThread_.loading = false;
+      if (!result.ok) {
+        SetStatus(T("回复失败: ", "Reply failed: ") + result.error.ToString());
+        return;
+      }
+      OpenForumThread(discussion);
+      SetStatus(T("回复已发送", "Reply sent"));
+    });
+  });
+}
+
+void App::StartForumCreate() {
+  if (!ForumLoggedIn()) {
+    SetStatus(T("发主题需要先登录论坛", "Sign in to the forum to post"));
+    return;
+  }
+  SetStatus(T("正在加载论坛标签…", "Loading forum tags…"));
+
+  worker_.Submit([this] {
+    auto result = forumApi_.Tags();
+    worker_.Post([this, result] {
+      if (!result.ok) {
+        SetStatus(T("加载标签失败: ", "Could not load tags: ") +
+                  result.error.ToString());
+        return;
+      }
+      nlohmann::json available = nlohmann::json::array();
+      std::string default_tag;
+      for (const auto& tag : result.value) {
+        available.push_back(
+            {{"id", tag.id}, {"name", tag.name}, {"slug", tag.slug}});
+        if (default_tag.empty()) default_tag = tag.slug;
+      }
+      nlohmann::json initial = {
+          {"title", ""},
+          {"content", ""},
+          {"tags", default_tag.empty() ? nlohmann::json::array()
+                                       : nlohmann::json::array({default_tag})},
+          {"available_tags", available},
+      };
+
+      std::string error;
+      auto edited = EditJsonDocument(initial, "spark-tui-discussion", error);
+      if (!edited) {
+        if (!error.empty()) SetStatus(error);
+        return;
+      }
+      if (!edited->is_object() || !edited->contains("title") ||
+          !edited->at("title").is_string() || !edited->contains("content") ||
+          !edited->at("content").is_string() || !edited->contains("tags") ||
+          !edited->at("tags").is_array()) {
+        SetStatus(T("需要 title、content 和 tags 字段",
+                    "Expected title, content and tags fields"));
+        return;
+      }
+
+      const std::string title = Trim(edited->at("title").get<std::string>());
+      const std::string content = edited->at("content").get<std::string>();
+      if (title.empty() || content.empty()) {
+        SetStatus(T("标题和正文不能为空", "Title and content must not be empty"));
+        return;
+      }
+
+      std::map<std::string, std::string> ids;
+      for (const auto& tag : result.value) ids[tag.slug] = tag.id;
+      std::vector<std::string> tag_ids;
+      for (const auto& entry : edited->at("tags")) {
+        if (!entry.is_string()) continue;
+        const std::string slug = entry.get<std::string>();
+        const auto it = ids.find(slug);
+        if (it == ids.end()) {
+          SetStatus(T("未知标签: ", "Unknown tag: ") + slug);
+          return;
+        }
+        tag_ids.push_back(it->second);
+      }
+
+      SetStatus(T("正在创建主题…", "Creating the discussion…"));
+      worker_.Submit([this, title, content, tag_ids] {
+        auto created = forumApi_.CreateDiscussion(title, content, tag_ids);
+        worker_.Post([this, created] {
+          if (!created.ok) {
+            SetStatus(T("创建主题失败: ", "Could not create the discussion: ") +
+                      created.error.ToString());
+            return;
+          }
+          forum_ = ForumState{};
+          forumThread_ = ForumThreadState{};
+          if (tab_ == Tab::Forum) LoadForum(false);
+          SetStatus(T("主题已创建", "Discussion created"));
+        });
+      });
+    });
+  });
+}
+
+void App::StartForumTagEdit() {
+  if (!ForumLoggedIn() || !forumManage_.discussion.canTag) {
+    forumManage_.message =
+        T("当前账号不能编辑标签", "This account cannot edit tags");
+    return;
+  }
+  if (forumManage_.busy) return;
+  forumManage_.busy = true;
+  forumManage_.message = T("正在加载论坛标签…", "Loading forum tags…");
+
+  const std::string id = forumManage_.discussion.id;
+  const bool from_detail = forumManage_.from_detail;
+  const std::vector<std::string> current = forumManage_.discussion.tagSlugs;
+  const int fetch_generation = ++forumManage_.generation;
+
+  worker_.Submit([this, id, current, from_detail, fetch_generation] {
+    auto result = forumApi_.Tags();
+    worker_.Post([this, id, current, from_detail, result, fetch_generation] {
+      if (fetch_generation != forumManage_.generation) return;
+      if (!result.ok) {
+        forumManage_.busy = false;
+        forumManage_.message = T("加载标签失败: ", "Could not load tags: ") +
+                               result.error.ToString();
+        return;
+      }
+      nlohmann::json available = nlohmann::json::array();
+      for (const auto& tag : result.value) {
+        available.push_back(
+            {{"id", tag.id}, {"name", tag.name}, {"slug", tag.slug}});
+      }
+      nlohmann::json initial = {
+          {"tags", current},
+          {"available_tags", available},
+      };
+
+      std::string error;
+      auto edited = EditJsonDocument(initial, "spark-tui-tags", error);
+      forumManage_.busy = false;
+      if (!edited) {
+        if (!error.empty()) forumManage_.message = error;
+        return;
+      }
+      if (!edited->is_object() || !edited->contains("tags") ||
+          !edited->at("tags").is_array()) {
+        forumManage_.message =
+            T("需要一个包含 tags 数组的 JSON 对象",
+              "Expected a JSON object with a tags array");
+        return;
+      }
+
+      std::map<std::string, std::string> ids;
+      for (const auto& tag : result.value) ids[tag.slug] = tag.id;
+      std::vector<std::string> tag_ids;
+      std::vector<std::string> slugs;
+      std::vector<std::string> names;
+      for (const auto& entry : edited->at("tags")) {
+        if (!entry.is_string()) continue;
+        const std::string slug = entry.get<std::string>();
+        const auto it = ids.find(slug);
+        if (it == ids.end()) {
+          forumManage_.message =
+              T("未知标签: ", "Unknown tag: ") + slug;
+          return;
+        }
+        tag_ids.push_back(it->second);
+        slugs.push_back(slug);
+        for (const auto& tag : result.value) {
+          if (tag.slug == slug) names.push_back(tag.name);
+        }
+      }
+
+      forumManage_.busy = true;
+      forumManage_.message = T("正在保存标签…", "Saving tags…");
+      const int save_generation = ++forumManage_.generation;
+      ForumDiscussion updated = forumManage_.discussion;
+      updated.tagSlugs = slugs;
+      updated.tagNames = names;
+
+      worker_.Submit([this, id, tag_ids, save_generation, updated, from_detail] {
+        auto saved = forumApi_.SetDiscussionTags(id, tag_ids);
+        worker_.Post([this, save_generation, saved, updated, from_detail] {
+          if (save_generation != forumManage_.generation) return;
+          forumManage_.busy = false;
+          if (!saved.ok) {
+            forumManage_.message = T("保存标签失败: ", "Tag update failed: ") +
+                                   saved.error.ToString();
+            return;
+          }
+          mode_ = Mode::Browse;
+          forum_ = ForumState{};
+          forumThread_ = ForumThreadState{};
+          if (from_detail) {
+            OpenForumThread(updated);
+          } else {
+            LoadForum(false);
+          }
+          SetStatus(T("标签已更新", "Tags updated"));
+        });
+      });
     });
   });
 }
@@ -882,23 +1867,30 @@ void App::StartStartupSync() {
       cfg_.instance.autoMain = working.instance.autoMain;
       cfg_.instance.autoStatus = working.instance.autoStatus;
       cfg_.instance.autoForum = working.instance.autoForum;
-      if (outcome.signedOut) {
-        api_.SetToken("");
-        cfg_.token = {};
-      }
       const std::string newMain = cfg_.EffectiveMain();
       SaveConfig();
 
       if (newMain != oldMain) {
         ApplyInstanceChange();
         SetStatus(T("主服务器已更新: ", "Main server updated: ") + newMain);
+      } else if (outcome.mainRejected) {
+        SetStatus(T("新主服务器不接受旧令牌，已保留 ",
+                    "The new main server rejected the old token; kept ") +
+                  oldMain +
+                  T("；请在设置中退出登录后再切换",
+                    "; sign out in Settings before switching"));
       } else if (outcome.mainHeld) {
         SetStatus(T("服务源已同步；新主服务器不可达，保留 ",
                     "Service source synced; new main server unreachable, kept ") +
                   oldMain);
-      } else if (outcome.signedOut) {
-        SetStatus(T("主服务器已更新；旧登录已失效",
-                    "Main server updated; the old sign-in is no longer valid"));
+      } else if (outcome.forumRejected) {
+        SetStatus(T("新论坛服务器不接受旧令牌，已保留原论坛地址",
+                    "The new forum server rejected the old token; kept the old "
+                    "forum address"));
+      } else if (outcome.forumHeld) {
+        SetStatus(T("新论坛服务器不可达，已保留原论坛地址",
+                    "The new forum server is unreachable; kept the old forum "
+                    "address"));
       } else if (outcome.forumChanged) {
         SetStatus(T("论坛地址已更新: ", "Forum address updated: ") +
                   outcome.forumUrl);
@@ -965,53 +1957,154 @@ bool App::SaveSettings() {
     }
   }
 
-  const std::string oldMain = cfg_.EffectiveMain();
-  cfg_.instance.syncUrl = *sync;
-  cfg_.instance.mainOverride = main;
-  cfg_.instance.statusOverride = status;
-  cfg_.instance.forumOverride = forum;
-  ++instanceGeneration_;
+  Config pending = cfg_;
+  pending.instance.syncUrl = *sync;
+  pending.instance.mainOverride = main;
+  pending.instance.statusOverride = status;
+  pending.instance.forumOverride = forum;
+
+  std::vector<std::string> changes;
+  auto add_change = [&](const std::string& label, const std::string& from,
+                        const std::string& to) {
+    changes.push_back(label + ": " + from + " -> " + to);
+  };
+  if (pending.instance.syncUrl != cfg_.instance.syncUrl) {
+    add_change(T("同步源", "Sync source"), cfg_.instance.syncUrl,
+               pending.instance.syncUrl);
+  }
+  if (pending.EffectiveMain() != cfg_.EffectiveMain()) {
+    add_change(T("主服务器", "Main server"), cfg_.EffectiveMain(),
+               pending.EffectiveMain());
+  }
+  if (pending.EffectiveStatus() != cfg_.EffectiveStatus()) {
+    add_change(T("状态服务器", "Status server"), cfg_.EffectiveStatus(),
+               pending.EffectiveStatus());
+  }
+  if (pending.EffectiveForum() != cfg_.EffectiveForum()) {
+    add_change(T("论坛服务器", "Forum server"), cfg_.EffectiveForum(),
+               pending.EffectiveForum());
+  }
+
   settings_.sync = *sync;
   settings_.main = main.value_or("");
   settings_.status = status.value_or("");
   settings_.forum = forum.value_or("");
   settings_.cursor = SettingsField().size();
 
-  const std::string newMain = cfg_.EffectiveMain();
-  SaveConfig();
-
-  if (newMain == oldMain) {
-    settings_.message = T("已保存", "Saved");
+  if (changes.empty()) {
+    settings_.message = T("没有变更", "No changes");
     return true;
   }
 
-  ApplyInstanceChange();
-  settings_.message =
-      T("已保存；主服务器: ", "Saved; main server: ") + newMain;
-
-  if (!cfg_.token.Empty()) {
-    const Config snapshot = cfg_;
-    worker_.Submit([this, snapshot, newMain] {
-      const int probe =
-          ProbeToken(newMain, snapshot.insecure, snapshot.token.plaintext);
-      worker_.Post([this, probe] {
-        if (probe == 0) {
-          api_.SetToken("");
-          cfg_.token = {};
-          SaveConfig();
-          SetStatus(T("新主服务器不接受旧令牌，已登出",
-                      "The new main server rejected the old token; signed out"));
-        } else if (probe == 1) {
-          SetStatus(T("主服务器已切换，登录保持有效",
-                      "Main server switched; sign-in is still valid"));
-        } else {
-          SetStatus(T("主服务器已切换，暂时无法验证登录",
-                      "Main server switched; could not verify sign-in yet"));
-        }
-      });
-    });
-  }
+  StartSourceReview(std::move(pending), std::move(changes));
   return true;
+}
+
+void App::StartSourceReview(Config pending,
+                            std::vector<std::string> changes) {
+  sourceReview_ = SourceReviewState{};
+  sourceReview_.pending = std::move(pending);
+  sourceReview_.changes = std::move(changes);
+  sourceReview_.base_generation = instanceGeneration_;
+  mode_ = Mode::SourceReview;
+  status_.clear();
+  ProbeSourceReview();
+}
+
+void App::ProbeSourceReview() {
+  if (sourceReview_.busy) return;
+  const int generation = ++sourceReview_.generation;
+  const bool need_spark =
+      sourceReview_.pending.EffectiveMain() != cfg_.EffectiveMain() &&
+      !sourceReview_.pending.token.Empty();
+  const bool need_forum =
+      sourceReview_.pending.EffectiveForum() != cfg_.EffectiveForum() &&
+      !sourceReview_.pending.forum.Empty();
+
+  sourceReview_.spark_probe = need_spark ? -2 : 2;
+  sourceReview_.forum_probe = need_forum ? -2 : 2;
+  sourceReview_.message.clear();
+  if (!need_spark && !need_forum) {
+    sourceReview_.busy = false;
+    return;
+  }
+
+  sourceReview_.busy = true;
+  const Config snapshot = sourceReview_.pending;
+  worker_.Submit([this, snapshot, need_spark, need_forum, generation] {
+    int spark = 2;
+    int forum = 2;
+    if (need_spark) {
+      spark = ProbeToken(snapshot.EffectiveMain(), snapshot.insecure,
+                         snapshot.token.plaintext);
+    }
+    if (need_forum) {
+      ForumClient probe(snapshot.EffectiveForum(), snapshot.insecure,
+                        snapshot.forum.token);
+      auto result = probe.RawRequest("GET", "/api", nlohmann::json::object());
+      if (result.ok) {
+        forum = 1;
+      } else if (result.error.status == 401 || result.error.status == 403) {
+        forum = 0;
+      } else {
+        forum = -1;
+      }
+    }
+    worker_.Post([this, generation, spark, forum] {
+      if (generation != sourceReview_.generation) return;
+      sourceReview_.spark_probe = spark;
+      sourceReview_.forum_probe = forum;
+      sourceReview_.busy = false;
+    });
+  });
+}
+
+bool App::SourceReviewBlocked() const {
+  if (sourceReview_.busy) return true;
+  return sourceReview_.spark_probe < 1 || sourceReview_.forum_probe < 1;
+}
+
+void App::ApplySourceReview() {
+  if (sourceReview_.busy) return;
+  if (sourceReview_.spark_probe < 1 || sourceReview_.forum_probe < 1) {
+    sourceReview_.message =
+        T("令牌尚未验证通过，请先退出失效的登录或重试",
+          "Tokens are not verified; sign out or retry first");
+    return;
+  }
+  if (sourceReview_.base_generation != instanceGeneration_) {
+    sourceReview_.message =
+        T("服务源已在后台更新，请取消后重新编辑",
+          "The service source changed in the background; cancel and retry");
+    return;
+  }
+
+  const bool need_login = sourceReview_.logged_out_spark ||
+                          sourceReview_.logged_out_forum;
+  const bool spark_first = sourceReview_.logged_out_spark;
+
+  cfg_ = sourceReview_.pending;
+  ++instanceGeneration_;
+  SaveConfig();
+  ApplyInstanceChange();
+
+  settings_.sync = cfg_.instance.syncUrl;
+  settings_.main = cfg_.instance.mainOverride.value_or("");
+  settings_.status = cfg_.instance.statusOverride.value_or("");
+  settings_.forum = cfg_.instance.forumOverride.value_or("");
+  settings_.message = T("已保存变更", "Changes saved");
+  mode_ = Mode::InstanceSettings;
+
+  if (need_login) {
+    loginMenu_.selected = spark_first ? 0 : 1;
+    mode_ = Mode::LoginMenu;
+    SetStatus(spark_first
+                  ? T("主服务器已切换，请重新登录 Spark ORG",
+                      "Main server switched; sign in to Spark ORG again")
+                  : T("论坛服务器已切换，请重新登录论坛",
+                      "Forum server switched; sign in to the forum again"));
+  }
+  sourceReview_ = SourceReviewState{};
 }
 
 void App::SyncNow() {
@@ -1045,10 +2138,6 @@ void App::SyncNow() {
 
       const std::string oldMain = cfg_.EffectiveMain();
       cfg_.instance = working.instance;
-      if (outcome.signedOut) {
-        api_.SetToken("");
-        cfg_.token = {};
-      }
       const std::string newMain = cfg_.EffectiveMain();
       SaveConfig();
       settings_.main = cfg_.instance.mainOverride.value_or("");
@@ -1059,14 +2148,25 @@ void App::SyncNow() {
         ApplyInstanceChange();
         settings_.message =
             T("已同步；主服务器: ", "Synced; main server: ") + newMain;
+      } else if (outcome.mainRejected) {
+        settings_.message =
+            T("已同步；新主服务器不接受旧令牌，已保留原地址。请先在设置中退出登录",
+              "Synced; the new main server rejected the old token. Sign out "
+              "in Settings first");
       } else if (outcome.mainHeld) {
         settings_.message =
             T("已同步；新主服务器不可达，保留原地址",
               "Synced; new main server unreachable, kept the old address");
-      } else if (outcome.signedOut) {
+      } else if (outcome.forumRejected) {
         settings_.message =
-            T("已同步；旧登录已失效",
-              "Synced; the old sign-in is no longer valid");
+            T("已同步；新论坛服务器不接受旧令牌，已保留原论坛地址",
+              "Synced; the new forum server rejected the old token; kept the "
+              "old forum address");
+      } else if (outcome.forumHeld) {
+        settings_.message =
+            T("已同步；新论坛服务器不可达，已保留原论坛地址",
+              "Synced; the new forum server is unreachable; kept the old forum "
+              "address");
       } else if (outcome.forumChanged) {
         settings_.message =
             T("已同步；论坛: ", "Synced; forum: ") + outcome.forumUrl;
@@ -1247,6 +2347,61 @@ Element App::Render() {
     layout = dbox({layout, dialog | center});
   }
 
+  if (mode_ == Mode::NewsMenu && newsManage_.confirm == 1) {
+    Element dialog =
+        vbox({
+            text(T("删除这条新闻？此操作不可撤销",
+                   "Delete this story? This cannot be undone")) |
+                bold,
+            separator(),
+            text(T("y 确认    n / Esc 取消", "y confirm    n / Esc cancel")) |
+                dim,
+        }) |
+        border | bgcolor(Color::Black) | clear_under;
+    layout = dbox({layout, dialog | center});
+  }
+
+  if (mode_ == Mode::NewsHistory && newsHistory_.confirm == 1) {
+    Element dialog =
+        vbox({
+            text(T("回滚到这个版本？", "Revert to this revision?")) | bold,
+            separator(),
+            text(T("y 确认    n / Esc 取消", "y confirm    n / Esc cancel")) |
+                dim,
+        }) |
+        border | bgcolor(Color::Black) | clear_under;
+    layout = dbox({layout, dialog | center});
+  }
+
+  if (mode_ == Mode::ForumManage && forumManage_.confirm > 0) {
+    const auto actions = ForumActions();
+    const int index = forumManage_.confirm - 1;
+    std::string label;
+    if (index >= 0 && index < static_cast<int>(actions.size())) {
+      switch (actions[static_cast<std::size_t>(index)]) {
+        case ForumAction::Hide:
+          label = T("隐藏这个主题？", "Hide this discussion?");
+          break;
+        case ForumAction::Delete:
+          label = T("删除这个主题？此操作不可撤销",
+                    "Delete this discussion? This cannot be undone");
+          break;
+        default:
+          label = T("确认执行这个操作？", "Run this action?");
+          break;
+      }
+    }
+    Element dialog =
+        vbox({
+            text(label) | bold,
+            separator(),
+            text(T("y 确认    n / Esc 取消", "y confirm    n / Esc cancel")) |
+                dim,
+        }) |
+        border | bgcolor(Color::Black) | clear_under;
+    layout = dbox({layout, dialog | center});
+  }
+
   return layout;
 }
 
@@ -1312,6 +2467,12 @@ Element App::Content() {
   if (mode_ == Mode::ForumLogin) return ForumLoginView();
   if (mode_ == Mode::Settings) return SettingsMenuView();
   if (mode_ == Mode::InstanceSettings) return InstanceSettingsView();
+  if (mode_ == Mode::HomeManage) return HomeManageView();
+  if (mode_ == Mode::ForumManage) return ForumManageView();
+  if (mode_ == Mode::ForumApi) return ForumApiView();
+  if (mode_ == Mode::SourceReview) return SourceReviewView();
+  if (mode_ == Mode::NewsMenu) return NewsMenuView();
+  if (mode_ == Mode::NewsHistory) return NewsHistoryView();
   if (mode_ == Mode::ForumDetail) return ForumDetailView();
   if (mode_ == Mode::Detail) return DetailView();
   if (tab_ == Tab::Home) return HomeView();
@@ -1374,6 +2535,408 @@ Element App::HomeView() {
 
   lines.push_back(filler());
 
+  return vbox(std::move(lines)) | border;
+}
+
+Element App::HomeManageView() {
+  int picked_count = 0;
+  for (const auto& item : homeManage_.items) {
+    if (item.picked) ++picked_count;
+  }
+
+  Elements lines;
+  lines.push_back(hbox({
+      text(T("主页置顶管理", "Home page picks")) | bold,
+      filler(),
+      text(std::to_string(picked_count) + "/" +
+           std::to_string(homeManage_.max)) |
+          dim,
+  }));
+  lines.push_back(separator());
+
+  if (homeManage_.loading && homeManage_.items.empty()) {
+    lines.push_back(text(T("加载中…", "Loading…")) | dim);
+  } else if (!homeManage_.error.empty()) {
+    lines.push_back(text(homeManage_.error) | color(Color::Red));
+    lines.push_back(text(T("按 r 重试   Esc 返回", "Press r to retry   Esc to go back")) |
+                    dim);
+  } else if (homeManage_.items.empty()) {
+    lines.push_back(text(T("没有可管理的新闻", "No stories to manage")) | dim);
+  } else {
+    Elements rows;
+    const int list_width = std::max(20, screen_.dimx() - 4);
+    int pick_index = 0;
+    for (std::size_t i = 0; i < homeManage_.items.size(); ++i) {
+      const HomePickEntry& item = homeManage_.items[i];
+      const bool selected = static_cast<int>(i) == homeManage_.selected;
+      std::string marker = "    ";
+      if (item.picked) {
+        ++pick_index;
+        marker = "[" + std::to_string(pick_index) + "]";
+        marker = marker + std::string(4 - marker.size(), ' ');
+      }
+
+      Elements row;
+      row.push_back(text(selected ? "▶ " : "  ") |
+                    color(selected ? Color::Cyan : Color::GrayDark));
+      row.push_back(text(marker) |
+                    color(item.picked ? Color::Yellow : Color::GrayDark));
+      row.push_back(text("  "));
+      const int title_width = std::max(8, list_width - 10);
+      row.push_back(text(Ellipsize(item.title, title_width)) |
+                    (selected ? Decorator(bold) : Decorator(nothing)) |
+                    xflex_shrink);
+      row.push_back(filler());
+
+      Element line = hbox(std::move(row));
+      if (selected) {
+        line = line | inverted;
+        line = focus(line);
+      }
+      rows.push_back(line);
+    }
+    lines.push_back(vbox(std::move(rows)) | yframe | flex);
+  }
+
+  if (homeManage_.busy || homeManage_.loading) {
+    lines.push_back(text(T("处理中…", "Working…")) | color(Color::Yellow));
+  }
+  if (!homeManage_.message.empty()) {
+    lines.push_back(text(homeManage_.message) | color(Color::Yellow));
+  }
+  lines.push_back(text(T("Enter 置顶 / 取消   J/K 调整顺序   r 刷新   Esc 返回",
+                         "Enter pin / unpin   J/K reorder   r refresh   Esc back")) |
+                  dim);
+  return vbox(std::move(lines)) | border;
+}
+
+Element App::ForumManageView() {
+  Elements lines;
+  lines.push_back(text(T("论坛管理", "Forum moderation")) | bold);
+  lines.push_back(text(forumManage_.discussion.title) | dim);
+  lines.push_back(separator());
+
+  if (forumManage_.renaming) {
+    const std::size_t cursor =
+        std::min(forumManage_.title_cursor, forumManage_.title.size());
+    lines.push_back(hbox({
+        text(T("标题: ", "Title: ")) | bold,
+        text(forumManage_.title.substr(0, cursor)),
+        text("▏") | color(Color::Cyan) | bold,
+        text(forumManage_.title.substr(cursor)),
+        filler(),
+    }));
+    lines.push_back(separator());
+    if (!forumManage_.message.empty()) {
+      lines.push_back(text(forumManage_.message) | color(Color::Yellow));
+    }
+    lines.push_back(text(T("Enter 保存   Esc 取消", "Enter save   Esc cancel")) |
+                    dim);
+    return vbox(std::move(lines)) | border;
+  }
+
+  const std::vector<ForumAction> actions = ForumActions();
+  if (actions.empty()) {
+    lines.push_back(text(T("当前账号没有可用的管理操作",
+                           "This account has no moderation actions")) |
+                    color(Color::Red));
+  } else {
+    for (std::size_t i = 0; i < actions.size(); ++i) {
+      const bool selected = static_cast<int>(i) == forumManage_.selected;
+      std::string label;
+      switch (actions[i]) {
+        case ForumAction::Sticky:
+          label = forumManage_.discussion.sticky
+                      ? T("取消置顶", "Unpin")
+                      : T("置顶", "Pin");
+          break;
+        case ForumAction::Lock:
+          label = forumManage_.discussion.locked
+                      ? T("取消锁定", "Unlock")
+                      : T("锁定", "Lock");
+          break;
+        case ForumAction::Hide:
+          label = T("隐藏主题", "Hide discussion");
+          break;
+        case ForumAction::Tags:
+          label = T("编辑标签", "Edit tags");
+          break;
+        case ForumAction::Rename:
+          label = T("重命名", "Rename");
+          break;
+        case ForumAction::Delete:
+          label = T("删除主题", "Delete discussion");
+          break;
+      }
+      Element line = hbox({
+          text(selected ? "▶ " : "  ") |
+              color(selected ? Color::Cyan : Color::GrayDark),
+          text(label) | (selected ? Decorator(bold) : Decorator(nothing)),
+          filler(),
+      });
+      if (selected) line = line | inverted;
+      lines.push_back(line);
+    }
+  }
+  lines.push_back(separator());
+  if (forumManage_.busy) {
+    lines.push_back(text(T("处理中…", "Working…")) | color(Color::Yellow));
+  }
+  if (!forumManage_.message.empty()) {
+    lines.push_back(text(forumManage_.message) | color(Color::Yellow));
+  }
+  lines.push_back(text(T("↑↓ 选择   Enter 执行   Esc 返回",
+                         "↑↓ select   Enter run   Esc back")) |
+                  dim);
+  return vbox(std::move(lines)) | border;
+}
+
+Element App::ForumApiView() {
+  static const char* kMethods[] = {"GET", "POST", "PATCH", "DELETE"};
+  const auto presets = ForumApiPresets();
+
+  if (forumApiTool_.show_presets) {
+    Elements lines;
+    lines.push_back(text(T("论坛 API 预设", "Forum API presets")) | bold);
+    lines.push_back(text(T("选择常用或扩展接口，Enter 载入；路径可继续编辑",
+                           "Pick an endpoint, Enter to load; then edit the path")) |
+                    dim);
+    lines.push_back(separator());
+    Elements rows;
+    for (std::size_t i = 0; i < presets.size(); ++i) {
+      const bool selected =
+          static_cast<int>(i) == forumApiTool_.preset_selected;
+      Element line = hbox({
+          text(selected ? "▶ " : "  ") |
+              color(selected ? Color::Cyan : Color::GrayDark),
+          text(presets[i].name) |
+              (selected ? Decorator(bold) : Decorator(nothing)),
+          filler(),
+          text(presets[i].method + " " + presets[i].path) | dim,
+      });
+      if (selected) line = line | inverted;
+      rows.push_back(line);
+    }
+    lines.push_back(vbox(std::move(rows)) | yframe | flex);
+    lines.push_back(text(T("↑↓ 选择   Enter 载入   Esc / p 关闭",
+                           "↑↓ select   Enter load   Esc / p close")) |
+                    dim);
+    return vbox(std::move(lines)) | border;
+  }
+
+  const std::string method =
+      kMethods[std::clamp(forumApiTool_.method, 0, 3)];
+  const std::size_t cursor =
+      std::min(forumApiTool_.cursor, forumApiTool_.path.size());
+
+  Elements lines;
+  lines.push_back(hbox({
+      text(T("论坛 API 工具", "Forum API console")) | bold,
+      filler(),
+      text(method) | color(Color::Cyan),
+  }));
+  lines.push_back(text(T("用于调用 Flarum 扩展的 JSON:API；不会写入预设文件",
+                         "Call Flarum extension JSON:API endpoints directly")) |
+                  dim);
+  lines.push_back(separator());
+  lines.push_back(hbox({
+      text(T("方法: ", "Method: ")),
+      text("[" + method + "]") | bold | color(Color::Cyan),
+      text(T("   Tab 切换   Ctrl-E 请求体",
+             "   Tab cycle   Ctrl-E body")) | dim,
+      filler(),
+  }));
+  lines.push_back(hbox({
+      text(T("路径: ", "Path: ")),
+      text(forumApiTool_.path.substr(0, cursor)),
+      text("▏") | bold | color(Color::Cyan),
+      text(forumApiTool_.path.substr(cursor)),
+      filler(),
+  }));
+  if (method == "GET" || method == "DELETE") {
+    lines.push_back(text(T("请求体: 不使用", "Body: not used")) | dim);
+  } else {
+    lines.push_back(text(T("请求体: ", "Body: ") +
+                         std::to_string(forumApiTool_.body.size()) +
+                         T(" 字节（e 编辑）", " bytes (e to edit)")) |
+                    dim);
+  }
+  lines.push_back(separator());
+
+  std::vector<std::string> response;
+  if (forumApiTool_.response.empty()) {
+    response.push_back(T("按 Enter 发送请求", "Press Enter to send"));
+  } else {
+    response = WrapText(forumApiTool_.response,
+                        static_cast<std::size_t>(
+                            std::max(20, screen_.dimx() - 4)));
+  }
+  const int height = std::max(3, screen_.dimy() - 14);
+  lines.push_back(ScrollLines(response, forumApiTool_.scroll, height) | flex);
+  if (forumApiTool_.busy) {
+    lines.push_back(text(T("请求中…", "Sending…")) | color(Color::Yellow));
+  }
+  if (!forumApiTool_.status.empty()) {
+    lines.push_back(text(forumApiTool_.status) | color(Color::Yellow));
+  }
+  lines.push_back(text(T("Enter/Ctrl-R 发送   Ctrl-P 预设   Tab 方法   Ctrl-E 请求体   ↑↓ 滚动   Esc 返回",
+                         "Enter/Ctrl-R send   Ctrl-P presets   Tab method   Ctrl-E body   ↑↓ scroll   Esc back")) |
+                  dim);
+  return vbox(std::move(lines)) | border;
+}
+
+Element App::SourceReviewView() {
+  Elements lines;
+  lines.push_back(text(T("确认服务源变更", "Review source changes")) | bold);
+  lines.push_back(separator());
+
+  const int width = std::max(20, screen_.dimx() - 6);
+  for (const auto& change : sourceReview_.changes) {
+    const auto wrapped = WrapText(
+        change, static_cast<std::size_t>(std::max(10, width - 4)));
+    lines.push_back(text("  - " + (wrapped.empty() ? "" : wrapped.front())));
+    for (std::size_t i = 1; i < wrapped.size(); ++i) {
+      lines.push_back(text("    " + wrapped[i]));
+    }
+  }
+
+  lines.push_back(separator());
+  if (sourceReview_.busy) {
+    lines.push_back(text(T("正在验证令牌…", "Checking tokens…")) |
+                    color(Color::Yellow));
+  }
+
+  auto probe_line = [&](const std::string& label, int probe) {
+    if (probe == 2) return;
+    std::string text_value;
+    Color tone = Color::Green;
+    if (probe == -2) {
+      text_value = T("检查中…", "checking…");
+      tone = Color::Yellow;
+    } else if (probe == 1) {
+      text_value = T("可用", "accepted");
+    } else if (probe == 0) {
+      text_value = T("被拒绝，需要先退出登录", "rejected; sign out first");
+      tone = Color::Red;
+    } else {
+      text_value = T("无法连接，暂时不能切换（r 重试）",
+                     "unreachable; cannot switch yet (r to retry)");
+      tone = Color::Yellow;
+    }
+    lines.push_back(hbox({
+        text(label + ": ") | bold,
+        text(text_value) | color(tone),
+    }));
+  };
+  probe_line(T("Spark ORG 令牌", "Spark ORG token"),
+             sourceReview_.spark_probe);
+  probe_line(T("论坛令牌", "Forum token"), sourceReview_.forum_probe);
+
+  if (sourceReview_.logged_out_spark) {
+    lines.push_back(text(T("已退出 Spark ORG；应用后进入登录管理",
+                           "Signed out of Spark ORG; login menu opens after apply")) |
+                    dim);
+  }
+  if (sourceReview_.logged_out_forum) {
+    lines.push_back(text(T("已退出论坛；应用后进入登录管理",
+                           "Signed out of the forum; login menu opens after apply")) |
+                    dim);
+  }
+  if (!sourceReview_.message.empty()) {
+    lines.push_back(text(sourceReview_.message) | color(Color::Yellow));
+  }
+  lines.push_back(separator());
+  lines.push_back(text(T("Enter 应用   O 退出失效登录   r 重新检查   Esc 取消",
+                         "Enter apply   O sign out invalid session   r retry   Esc cancel")) |
+                  dim);
+  return vbox(std::move(lines)) | border;
+}
+
+Element App::NewsMenuView() {
+  Elements lines;
+  lines.push_back(text(T("新闻管理", "News management")) | bold);
+  lines.push_back(text(newsManage_.item.title) | dim);
+  lines.push_back(separator());
+
+  const std::array<std::string, 4> labels = {
+      T("编辑底层数据", "Edit raw data"),
+      T("历史与回滚", "History & revert"),
+      T("删除新闻", "Delete story"),
+      T("返回", "Back"),
+  };
+  for (int i = 0; i < 4; ++i) {
+    const bool selected = newsManage_.selected == i;
+    Element line = hbox({
+        text(selected ? "▶ " : "  ") |
+            color(selected ? Color::Cyan : Color::GrayDark),
+        text(labels[static_cast<std::size_t>(i)]) |
+            (selected ? Decorator(bold) : Decorator(nothing)),
+        filler(),
+    });
+    if (selected) line = line | inverted;
+    lines.push_back(line);
+  }
+  lines.push_back(separator());
+  if (newsManage_.busy) {
+    lines.push_back(text(T("处理中…", "Working…")) | color(Color::Yellow));
+  }
+  if (!newsManage_.message.empty()) {
+    lines.push_back(text(newsManage_.message) | color(Color::Yellow));
+  }
+  lines.push_back(text(T("↑↓ 选择   Enter 执行   Esc 返回",
+                         "↑↓ select   Enter run   Esc back")) |
+                  dim);
+  return vbox(std::move(lines)) | border;
+}
+
+Element App::NewsHistoryView() {
+  Elements lines;
+  lines.push_back(hbox({
+      text(T("新闻历史", "News history")) | bold,
+      filler(),
+      text(newsHistory_.title) | dim,
+  }));
+  lines.push_back(separator());
+
+  if (newsHistory_.loading && newsHistory_.entries.empty()) {
+    lines.push_back(text(T("加载中…", "Loading…")) | dim);
+  } else if (!newsHistory_.error.empty()) {
+    lines.push_back(text(newsHistory_.error) | color(Color::Red));
+  } else if (newsHistory_.entries.empty()) {
+    lines.push_back(text(T("没有历史记录", "No revisions")) | dim);
+  } else {
+    Elements rows;
+    const int width = std::max(20, screen_.dimx() - 4);
+    for (std::size_t i = 0; i < newsHistory_.entries.size(); ++i) {
+      const HistoryEntry& entry = newsHistory_.entries[i];
+      const bool selected = static_cast<int>(i) == newsHistory_.selected;
+      std::string line_text = entry.createdAt;
+      if (!entry.op.empty()) line_text += "  " + entry.op;
+      if (!entry.actor.empty()) line_text += "  " + entry.actor;
+      if (!entry.note.empty()) line_text += "  " + entry.note;
+      Elements row;
+      row.push_back(text(selected ? "▶ " : "  ") |
+                    color(selected ? Color::Cyan : Color::GrayDark));
+      row.push_back(text(Ellipsize(line_text, width - 4)) |
+                    (selected ? Decorator(bold) : Decorator(nothing)) |
+                    xflex_shrink);
+      row.push_back(filler());
+      Element line = hbox(std::move(row));
+      if (selected) {
+        line = line | inverted;
+        line = focus(line);
+      }
+      rows.push_back(line);
+    }
+    lines.push_back(vbox(std::move(rows)) | yframe | flex);
+  }
+
+  if (!newsHistory_.message.empty()) {
+    lines.push_back(text(newsHistory_.message) | color(Color::Yellow));
+  }
+  lines.push_back(text(T("↑↓ 选择   Enter 回滚到此版本   Esc 返回",
+                         "↑↓ select   Enter revert   Esc back")) |
+                  dim);
   return vbox(std::move(lines)) | border;
 }
 
@@ -1948,12 +3511,61 @@ Element App::HelpView() {
     add(T(zh, en));
   };
 
-  if (mode_ == Mode::ForumDetail) {
+  if (mode_ == Mode::SourceReview) {
+    section("[确认服务源变更]", "[Review source changes]");
+    add(T("  Enter / y        应用变更", "  Enter / y        apply changes"));
+    add(T("  O                退出失效的登录", "  O                sign out invalid session"));
+    add(T("  r                重新检查令牌", "  r                retry token checks"));
+    add(T("  Esc / q          取消变更", "  Esc / q          cancel changes"));
+  } else if (mode_ == Mode::ForumApi) {
+    section("[论坛 API 工具]", "[Forum API console]");
+    add(T("  Tab              切换 GET / POST / PATCH / DELETE",
+          "  Tab              cycle GET / POST / PATCH / DELETE"));
+    add(T("  输入             编辑路径", "  type             edit the path"));
+    add(T("  Ctrl-E           编辑 JSON 请求体", "  Ctrl-E           edit the JSON body"));
+    add(T("  Enter / Ctrl-R   发送请求", "  Enter / Ctrl-R   send the request"));
+    add(T("  Ctrl-P           载入常用接口预设", "  Ctrl-P           load a preset"));
+    add(T("  Ctrl-U           清空路径", "  Ctrl-U           clear the path"));
+    add(T("  ↑↓ / PgUp/PgDn   滚动响应", "  ↑↓ / PgUp/PgDn   scroll the response"));
+    add(T("  Esc              返回", "  Esc              back"));
+  } else if (mode_ == Mode::NewsMenu) {
+    section("[新闻管理]", "[News management]");
+    add(T("  ↑↓ / j k         选择操作", "  ↑↓ / j k         select an action"));
+    add(T("  Enter            执行", "  Enter            run"));
+    add(T("  Esc / q          返回", "  Esc / q          back"));
+  } else if (mode_ == Mode::NewsHistory) {
+    section("[新闻历史]", "[News history]");
+    add(T("  ↑↓ / j k         选择版本", "  ↑↓ / j k         select a revision"));
+    add(T("  Enter            回滚到此版本", "  Enter            revert to it"));
+    add(T("  r                刷新历史", "  r                refresh history"));
+    add(T("  Esc              返回", "  Esc              back"));
+  } else if (mode_ == Mode::HomeManage) {
+    section("[主页置顶管理]", "[Home picks]");
+    add(T("  ↑↓ / j k         选择新闻", "  ↑↓ / j k         select a story"));
+    add(T("  Enter / Space    置顶 / 取消置顶",
+          "  Enter / Space    pin / unpin"));
+    add(T("  J / K            下移 / 上移置顶顺序",
+          "  J / K            move pin down / up"));
+    add(T("  r                刷新候选列表", "  r                refresh candidates"));
+    add(T("  Esc / q          返回主页", "  Esc / q          back to home"));
+  } else if (mode_ == Mode::ForumManage) {
+    section("[论坛管理]", "[Forum moderation]");
+    add(T("  ↑↓ / j k         选择操作", "  ↑↓ / j k         select an action"));
+    add(T("  Enter            执行操作", "  Enter            run the action"));
+    add(T("  Esc / q          返回", "  Esc / q          back"));
+    if (forumManage_.renaming) {
+      add(T("  输入             编辑标题", "  type             edit the title"));
+      add(T("  Enter            保存标题", "  Enter            save the title"));
+    }
+  } else if (mode_ == Mode::ForumDetail) {
     section("[论坛主题]", "[Forum discussion]");
     add(T("  ↑↓ / j k         滚动", "  ↑↓ / j k         scroll"));
     add(T("  PgUp / PgDn      翻页", "  PgUp / PgDn      page"));
     add(T("  Home / End       顶部 / 底部", "  Home / End       top / bottom"));
+    add(T("  a                回复主题", "  a                reply"));
+    add(T("  A                论坛 API 工具", "  A                forum API console"));
     add(T("  o                在浏览器打开", "  o                open in browser"));
+    add(T("  m                管理主题", "  m                moderate discussion"));
     add(T("  r                刷新主题", "  r                refresh discussion"));
     add(T("  Esc              返回论坛列表", "  Esc              back to the forum"));
   } else if (mode_ == Mode::Detail) {
@@ -2001,12 +3613,16 @@ Element App::HelpView() {
   } else if (tab_ == Tab::Home) {
     section("[主页]", "[Home]");
     add(T("  r                刷新主页", "  r                refresh home"));
+    add(T("  m                管理主页置顶", "  m                manage home picks"));
   } else if (tab_ == Tab::Forum) {
     section("[论坛]", "[Forum]");
     add(T("  ↑↓ / j k         选择主题", "  ↑↓ / j k         select discussion"));
     add(T("  Enter            查看主题", "  Enter            open discussion"));
     add(T("  n                加载下一页", "  n                load next page"));
     add(T("  r                刷新论坛", "  r                refresh forum"));
+    add(T("  c                发新主题", "  c                new discussion"));
+    add(T("  A                论坛 API 工具", "  A                forum API console"));
+    add(T("  m                管理选中的主题", "  m                moderate the selected discussion"));
     add(T("  o                在浏览器打开", "  o                open in browser"));
     add(T("  L                登录论坛", "  L                sign in to the forum"));
     add(T("  O                退出论坛登录", "  O                sign out of the forum"));
@@ -2037,6 +3653,10 @@ Element App::HelpView() {
     add(T("  n                加载下一页", "  n                load next page"));
     add(T("  o                在浏览器打开当前条目",
           "  o                open current item in browser"));
+    if (tab_ == Tab::News) {
+      add(T("  a                新建新闻", "  a                new story"));
+      add(T("  m                管理选中的新闻", "  m                manage the selected story"));
+    }
   }
 
   section("[帮助]", "[Help]");
@@ -2090,6 +3710,24 @@ bool App::HandleEvent(Event event) {
     return true;
   }
 
+  if (mode_ == Mode::HomeManage) {
+    return HandleHomeManageKey(std::move(event));
+  }
+  if (mode_ == Mode::ForumManage) {
+    return HandleForumManageKey(std::move(event));
+  }
+  if (mode_ == Mode::ForumApi) {
+    return HandleForumApiKey(std::move(event));
+  }
+  if (mode_ == Mode::SourceReview) {
+    return HandleSourceReviewKey(std::move(event));
+  }
+  if (mode_ == Mode::NewsMenu) {
+    return HandleNewsMenuKey(std::move(event));
+  }
+  if (mode_ == Mode::NewsHistory) {
+    return HandleNewsHistoryKey(std::move(event));
+  }
   if (mode_ == Mode::LoginMenu) {
     return HandleLoginMenuKey(std::move(event));
   }
@@ -2155,6 +3793,39 @@ bool App::HandleEvent(Event event) {
   }
   if (event == Event::Character('s')) {
     OpenSettings();
+    return true;
+  }
+  if (event == Event::Character('m')) {
+    if (mode_ == Mode::Browse && tab_ == Tab::Home) {
+      OpenHomeManage();
+    } else if (mode_ == Mode::Browse && tab_ == Tab::News) {
+      OpenNewsMenu();
+    } else if (mode_ == Mode::Browse && tab_ == Tab::Forum) {
+      OpenForumManage(false);
+    } else if (mode_ == Mode::ForumDetail) {
+      OpenForumManage(true);
+    }
+    return true;
+  }
+  if (event == Event::Character('a')) {
+    if (mode_ == Mode::Browse && tab_ == Tab::News) {
+      StartNewsEdit(true);
+    } else if (mode_ == Mode::ForumDetail) {
+      StartForumReply();
+    }
+    return true;
+  }
+  if (event == Event::Character('c')) {
+    if (mode_ == Mode::Browse && tab_ == Tab::Forum) {
+      StartForumCreate();
+    }
+    return true;
+  }
+  if (event == Event::Character('A')) {
+    if ((mode_ == Mode::Browse && tab_ == Tab::Forum) ||
+        mode_ == Mode::ForumDetail) {
+      OpenForumApi();
+    }
     return true;
   }
   if (event == Event::Character('L')) {
@@ -2510,6 +4181,483 @@ bool App::HandleInstanceSettingsKey(Event event) {
       settings_.cursor += character.size();
       return true;
     }
+  }
+  return true;
+}
+
+bool App::HandleForumApiKey(Event event) {
+  const auto presets = ForumApiPresets();
+
+  if (forumApiTool_.show_presets) {
+    if (event == Event::Escape || event == Event::Character('p')) {
+      forumApiTool_.show_presets = false;
+      return true;
+    }
+    if (event == Event::ArrowUp || event == Event::Character('k')) {
+      forumApiTool_.preset_selected =
+          (forumApiTool_.preset_selected +
+           static_cast<int>(presets.size()) - 1) %
+          static_cast<int>(presets.size());
+      return true;
+    }
+    if (event == Event::ArrowDown || event == Event::Character('j')) {
+      forumApiTool_.preset_selected =
+          (forumApiTool_.preset_selected + 1) %
+          static_cast<int>(presets.size());
+      return true;
+    }
+    if (event == Event::Return) {
+      if (!presets.empty()) {
+        const ForumApiPreset& preset =
+            presets[static_cast<std::size_t>(forumApiTool_.preset_selected)];
+        forumApiTool_.path = preset.path;
+        forumApiTool_.body = preset.body;
+        forumApiTool_.cursor = forumApiTool_.path.size();
+        if (preset.method == "POST") {
+          forumApiTool_.method = 1;
+        } else if (preset.method == "PATCH") {
+          forumApiTool_.method = 2;
+        } else if (preset.method == "DELETE") {
+          forumApiTool_.method = 3;
+        } else {
+          forumApiTool_.method = 0;
+        }
+        forumApiTool_.status =
+            T("已载入预设: ", "Preset loaded: ") + preset.name;
+      }
+      forumApiTool_.show_presets = false;
+      return true;
+    }
+    return true;
+  }
+
+  if (event == Event::Escape) {
+    mode_ = forumApiTool_.from_detail ? Mode::ForumDetail : Mode::Browse;
+    return true;
+  }
+  if (event == Event::Tab) {
+    forumApiTool_.method = (forumApiTool_.method + 1) % 4;
+    return true;
+  }
+  if (event.input() == std::string(1, '\x10')) {  // Ctrl-P: presets
+    forumApiTool_.show_presets = true;
+    forumApiTool_.preset_selected = 0;
+    return true;
+  }
+  if (event.input() == std::string(1, '\x05')) {  // Ctrl-E: edit body
+    if (forumApiTool_.method == 0 || forumApiTool_.method == 3) {
+      forumApiTool_.status =
+          T("GET / DELETE 不需要请求体", "GET / DELETE have no request body");
+      return true;
+    }
+    nlohmann::json current =
+        nlohmann::json::parse(forumApiTool_.body, nullptr, false);
+    if (current.is_discarded()) current = nlohmann::json::object();
+    std::string error;
+    auto edited = EditJsonDocument(current, "spark-tui-api", error);
+    if (!edited) {
+      if (!error.empty()) forumApiTool_.status = error;
+      return true;
+    }
+    forumApiTool_.body = edited->dump(2);
+    forumApiTool_.status = T("请求体已更新", "Request body updated");
+    return true;
+  }
+  if (forumApiTool_.busy) return true;
+
+  if (event == Event::Return ||
+      event.input() == std::string(1, '\x12')) {  // Ctrl-R: send
+    SendForumApiRequest();
+    return true;
+  }
+  if (event == Event::ArrowUp) {
+    if (forumApiTool_.scroll > 0) --forumApiTool_.scroll;
+    return true;
+  }
+  if (event == Event::ArrowDown) {
+    ++forumApiTool_.scroll;
+    return true;
+  }
+  if (event == Event::PageUp) {
+    forumApiTool_.scroll = std::max(0, forumApiTool_.scroll - 10);
+    return true;
+  }
+  if (event == Event::PageDown) {
+    forumApiTool_.scroll += 10;
+    return true;
+  }
+  std::string& path = forumApiTool_.path;
+  if (event.input() == std::string(1, '\x15')) {  // Ctrl-U clears the path
+    path.clear();
+    forumApiTool_.cursor = 0;
+    return true;
+  }
+  if (event == Event::Home) {
+    forumApiTool_.cursor = 0;
+    return true;
+  }
+  if (event == Event::End) {
+    forumApiTool_.cursor = path.size();
+    return true;
+  }
+  if (event == Event::Backspace) {
+    if (forumApiTool_.cursor > 0) {
+      const std::size_t previous =
+          Utf8Prev(path, forumApiTool_.cursor);
+      path.erase(previous, forumApiTool_.cursor - previous);
+      forumApiTool_.cursor = previous;
+    }
+    return true;
+  }
+  if (event == Event::Delete) {
+    if (forumApiTool_.cursor < path.size()) {
+      const std::size_t next = Utf8Next(path, forumApiTool_.cursor);
+      path.erase(forumApiTool_.cursor, next - forumApiTool_.cursor);
+    }
+    return true;
+  }
+  if (event == Event::ArrowLeft) {
+    forumApiTool_.cursor = Utf8Prev(path, forumApiTool_.cursor);
+    return true;
+  }
+  if (event == Event::ArrowRight) {
+    forumApiTool_.cursor = Utf8Next(path, forumApiTool_.cursor);
+    return true;
+  }
+  if (event.is_character()) {
+    const std::string character = event.character();
+    if (!character.empty() &&
+        static_cast<unsigned char>(character[0]) >= 32 &&
+        character[0] != 127) {
+      path.insert(forumApiTool_.cursor, character);
+      forumApiTool_.cursor += character.size();
+      return true;
+    }
+  }
+  return true;
+}
+
+bool App::HandleSourceReviewKey(Event event) {
+  if (event == Event::Escape || event == Event::Character('q')) {
+    ++sourceReview_.generation;
+    sourceReview_.busy = false;
+    settings_.sync = cfg_.instance.syncUrl;
+    settings_.main = cfg_.instance.mainOverride.value_or("");
+    settings_.status = cfg_.instance.statusOverride.value_or("");
+    settings_.forum = cfg_.instance.forumOverride.value_or("");
+    settings_.cursor = SettingsField().size();
+    mode_ = Mode::InstanceSettings;
+    settings_.message = T("已取消变更", "Changes cancelled");
+    return true;
+  }
+  if (event == Event::Character('r')) {
+    ProbeSourceReview();
+    return true;
+  }
+  if (event == Event::Character('O')) {
+    bool changed = false;
+    if (sourceReview_.spark_probe == 0) {
+      Logout();
+      sourceReview_.pending.token = {};
+      sourceReview_.spark_probe = 2;
+      sourceReview_.logged_out_spark = true;
+      changed = true;
+    }
+    if (sourceReview_.forum_probe == 0) {
+      LogoutForum();
+      sourceReview_.pending.forum = {};
+      sourceReview_.forum_probe = 2;
+      sourceReview_.logged_out_forum = true;
+      changed = true;
+    }
+    sourceReview_.message =
+        changed ? T("已退出失效登录；按 Enter 应用变更",
+                    "Invalid session signed out; press Enter to apply")
+                : T("没有需要退出的失效登录",
+                    "No invalid session to sign out");
+    return true;
+  }
+  if (sourceReview_.busy) return true;
+  if (event == Event::Return || event == Event::Character('y') ||
+      event == Event::Character('Y')) {
+    ApplySourceReview();
+    return true;
+  }
+  return true;
+}
+
+bool App::HandleNewsMenuKey(Event event) {
+  if (newsManage_.confirm == 1) {
+    if (event == Event::Character('y') || event == Event::Character('Y') ||
+        event == Event::Return) {
+      DeleteSelectedNews();
+    } else if (event == Event::Character('n') ||
+               event == Event::Character('N') ||
+               event == Event::Escape) {
+      newsManage_.confirm = 0;
+    }
+    return true;
+  }
+
+  if (event == Event::Escape || event == Event::Character('q')) {
+    ++newsManage_.generation;
+    mode_ = Mode::Browse;
+    return true;
+  }
+  if (newsManage_.busy) return true;
+
+  if (event == Event::ArrowUp || event == Event::Character('k')) {
+    newsManage_.selected = (newsManage_.selected + 3) % 4;
+    return true;
+  }
+  if (event == Event::ArrowDown || event == Event::Character('j')) {
+    newsManage_.selected = (newsManage_.selected + 1) % 4;
+    return true;
+  }
+  if (event == Event::Return || event == Event::Character(' ')) {
+    if (newsManage_.selected == 0) {
+      StartNewsEdit(false);
+    } else if (newsManage_.selected == 1) {
+      StartNewsHistory();
+    } else if (newsManage_.selected == 2) {
+      newsManage_.confirm = 1;
+    } else {
+      mode_ = Mode::Browse;
+    }
+    return true;
+  }
+  return true;
+}
+
+bool App::HandleNewsHistoryKey(Event event) {
+  if (newsHistory_.confirm == 1) {
+    if (event == Event::Character('y') || event == Event::Character('Y') ||
+        event == Event::Return) {
+      RevertSelectedHistory();
+    } else if (event == Event::Character('n') ||
+               event == Event::Character('N') ||
+               event == Event::Escape) {
+      newsHistory_.confirm = 0;
+    }
+    return true;
+  }
+
+  if (event == Event::Escape || event == Event::Character('q')) {
+    ++newsHistory_.generation;
+    mode_ = newsManage_.item.slug.empty() ? Mode::Browse : Mode::NewsMenu;
+    return true;
+  }
+  if (event == Event::ArrowUp || event == Event::Character('k')) {
+    if (newsHistory_.selected > 0) --newsHistory_.selected;
+    return true;
+  }
+  if (event == Event::ArrowDown || event == Event::Character('j')) {
+    if (newsHistory_.selected + 1 <
+        static_cast<int>(newsHistory_.entries.size())) {
+      ++newsHistory_.selected;
+    }
+    return true;
+  }
+  if (event == Event::PageUp) {
+    newsHistory_.selected = std::max(0, newsHistory_.selected - 10);
+    return true;
+  }
+  if (event == Event::PageDown) {
+    newsHistory_.selected =
+        std::min(std::max(0, static_cast<int>(newsHistory_.entries.size()) - 1),
+                 newsHistory_.selected + 10);
+    return true;
+  }
+  if (event == Event::Home) {
+    newsHistory_.selected = 0;
+    return true;
+  }
+  if (event == Event::End) {
+    newsHistory_.selected =
+        std::max(0, static_cast<int>(newsHistory_.entries.size()) - 1);
+    return true;
+  }
+  if (event == Event::Return || event == Event::Character(' ')) {
+    if (!newsHistory_.entries.empty()) newsHistory_.confirm = 1;
+    return true;
+  }
+  if (event == Event::Character('r')) {
+    StartNewsHistory();
+    return true;
+  }
+  return true;
+}
+
+bool App::HandleHomeManageKey(Event event) {
+  if (event == Event::Escape || event == Event::Character('q')) {
+    ++homeManage_.generation;  // discard any in-flight operation result
+    mode_ = Mode::Browse;
+    home_ = HomeState{};
+    LoadHome();
+    return true;
+  }
+  if (homeManage_.busy || homeManage_.loading) return true;
+
+  if (event == Event::ArrowUp || event == Event::Character('k')) {
+    if (homeManage_.selected > 0) --homeManage_.selected;
+    return true;
+  }
+  if (event == Event::ArrowDown || event == Event::Character('j')) {
+    if (homeManage_.selected + 1 <
+        static_cast<int>(homeManage_.items.size())) {
+      ++homeManage_.selected;
+    }
+    return true;
+  }
+  if (event == Event::PageUp) {
+    homeManage_.selected = std::max(0, homeManage_.selected - 10);
+    return true;
+  }
+  if (event == Event::PageDown) {
+    homeManage_.selected =
+        std::min(std::max(0, static_cast<int>(homeManage_.items.size()) - 1),
+                 homeManage_.selected + 10);
+    return true;
+  }
+  if (event == Event::Home) {
+    homeManage_.selected = 0;
+    return true;
+  }
+  if (event == Event::End) {
+    homeManage_.selected =
+        std::max(0, static_cast<int>(homeManage_.items.size()) - 1);
+    return true;
+  }
+  if (event == Event::Return || event == Event::Character(' ')) {
+    ToggleHomePick();
+    return true;
+  }
+  if (event == Event::Character('J')) {
+    ReorderHomePicks(1);
+    return true;
+  }
+  if (event == Event::Character('K')) {
+    ReorderHomePicks(-1);
+    return true;
+  }
+  if (event == Event::Character('r')) {
+    LoadHomeManage();
+    return true;
+  }
+  return true;
+}
+
+bool App::HandleForumManageKey(Event event) {
+  if (forumManage_.confirm > 0) {
+    if (event == Event::Character('y') || event == Event::Character('Y') ||
+        event == Event::Return) {
+      const auto actions = ForumActions();
+      const int index = forumManage_.confirm - 1;
+      if (index >= 0 && index < static_cast<int>(actions.size())) {
+        RunForumAction(actions[static_cast<std::size_t>(index)]);
+      } else {
+        forumManage_.confirm = 0;
+      }
+    } else if (event == Event::Character('n') ||
+               event == Event::Character('N') ||
+               event == Event::Escape) {
+      forumManage_.confirm = 0;
+    }
+    return true;
+  }
+
+  if (forumManage_.renaming) {
+    if (forumManage_.busy) return true;
+    if (event == Event::Escape) {
+      forumManage_.renaming = false;
+      forumManage_.message.clear();
+      return true;
+    }
+    if (event == Event::Return) {
+      SubmitForumRename();
+      return true;
+    }
+    std::string& title = forumManage_.title;
+    if (event == Event::Home) {
+      forumManage_.title_cursor = 0;
+      return true;
+    }
+    if (event == Event::End) {
+      forumManage_.title_cursor = title.size();
+      return true;
+    }
+    if (event == Event::ArrowLeft) {
+      forumManage_.title_cursor = Utf8Prev(title, forumManage_.title_cursor);
+      return true;
+    }
+    if (event == Event::ArrowRight) {
+      forumManage_.title_cursor = Utf8Next(title, forumManage_.title_cursor);
+      return true;
+    }
+    if (event == Event::Backspace) {
+      if (forumManage_.title_cursor > 0) {
+        const std::size_t previous =
+            Utf8Prev(title, forumManage_.title_cursor);
+        title.erase(previous, forumManage_.title_cursor - previous);
+        forumManage_.title_cursor = previous;
+      }
+      return true;
+    }
+    if (event == Event::Delete) {
+      if (forumManage_.title_cursor < title.size()) {
+        const std::size_t next =
+            Utf8Next(title, forumManage_.title_cursor);
+        title.erase(forumManage_.title_cursor,
+                    next - forumManage_.title_cursor);
+      }
+      return true;
+    }
+    if (event.is_character()) {
+      const std::string character = event.character();
+      if (!character.empty() &&
+          static_cast<unsigned char>(character[0]) >= 32 &&
+          character[0] != 127) {
+        title.insert(forumManage_.title_cursor, character);
+        forumManage_.title_cursor += character.size();
+        return true;
+      }
+    }
+    return true;
+  }
+
+  if (event == Event::Escape || event == Event::Character('q')) {
+    ++forumManage_.generation;
+    forumManage_.confirm = 0;
+    forumManage_.renaming = false;
+    mode_ = forumManage_.from_detail ? Mode::ForumDetail : Mode::Browse;
+    return true;
+  }
+  if (forumManage_.busy) return true;
+
+  const auto actions = ForumActions();
+  if (actions.empty()) return true;
+
+  if (event == Event::ArrowUp || event == Event::Character('k')) {
+    forumManage_.selected =
+        (forumManage_.selected + static_cast<int>(actions.size()) - 1) %
+        static_cast<int>(actions.size());
+    return true;
+  }
+  if (event == Event::ArrowDown || event == Event::Character('j')) {
+    forumManage_.selected =
+        (forumManage_.selected + 1) % static_cast<int>(actions.size());
+    return true;
+  }
+  if (event == Event::Return || event == Event::Character(' ')) {
+    const int index = forumManage_.selected;
+    if (index < 0 || index >= static_cast<int>(actions.size())) return true;
+    const ForumAction action = actions[static_cast<std::size_t>(index)];
+    if (action == ForumAction::Hide || action == ForumAction::Delete) {
+      forumManage_.confirm = index + 1;
+      return true;
+    }
+    RunForumAction(action);
+    return true;
   }
   return true;
 }

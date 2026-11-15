@@ -36,7 +36,17 @@ class ApiClient {
   Result<SearchResult> Search(const std::string& lang, const std::string& q,
                               int limit = 20, int offset = 0);
   // Public home-page picks: {max, picks:[slug], items:[{slug,title}]}.
+  // With a token that has news.edit it also returns `candidates`.
   Result<nlohmann::json> HomeNews();
+  Result<nlohmann::json> HomeNewsAdd(const std::string& slug);
+  Result<nlohmann::json> HomeNewsRemove(const std::string& slug);
+  Result<nlohmann::json> HomeNewsReorder(const std::vector<std::string>& picks);
+  Result<nlohmann::json> SaveNews(const std::string& slug,
+                                  const nlohmann::json& data);
+  Result<nlohmann::json> DeleteNews(const std::string& slug);
+  Result<nlohmann::json> History(const std::string& entity,
+                                 const std::string& slug);
+  Result<nlohmann::json> RevertHistory(const std::string& id);
   Result<nlohmann::json> Me();
 
   // RFC 8628 device authorisation.

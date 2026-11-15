@@ -1,6 +1,7 @@
 #include "util.h"
 
 #include <fcntl.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -8,6 +9,7 @@
 #include <algorithm>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <regex>
 #include <sstream>
 #include <utility>
@@ -358,6 +360,78 @@ bool EnsureDirectory(const std::string& path) {
   std::error_code ec;
   std::filesystem::create_directories(path, ec);
   return !ec;
+}
+
+std::optional<std::string> WriteTempFile(const std::string& prefix,
+                                         const std::string& content) {
+  const std::filesystem::path directory =
+      std::filesystem::temp_directory_path();
+  std::string pattern = (directory / (prefix + "-XXXXXX")).string();
+  std::vector<char> path(pattern.begin(), pattern.end());
+  path.push_back('\0');
+
+  const int fd = mkstemp(path.data());
+  if (fd < 0) return std::nullopt;
+  chmod(path.data(), S_IRUSR | S_IWUSR);
+
+  std::size_t offset = 0;
+  bool ok = true;
+  while (offset < content.size()) {
+    const ssize_t written =
+        write(fd, content.data() + offset, content.size() - offset);
+    if (written <= 0) {
+      ok = false;
+      break;
+    }
+    offset += static_cast<std::size_t>(written);
+  }
+  close(fd);
+  if (!ok) {
+    unlink(path.data());
+    return std::nullopt;
+  }
+  return std::string(path.data());
+}
+
+std::string ReadTextFile(const std::string& path) {
+  std::ifstream in(path);
+  if (!in) return {};
+  std::ostringstream out;
+  out << in.rdbuf();
+  return out.str();
+}
+
+bool EditFile(const std::string& path) {
+  const char* visual = std::getenv("VISUAL");
+  const char* editor = std::getenv("EDITOR");
+  std::string command = visual != nullptr && *visual != '\0'
+                            ? visual
+                        : editor != nullptr && *editor != '\0' ? editor
+                                                               : "vi";
+
+  auto quote = [](const std::string& value) {
+    std::string out = "'";
+    for (char c : value) {
+      if (c == '\'') {
+        out += "'\\''";
+      } else {
+        out += c;
+      }
+    }
+    out += "'";
+    return out;
+  };
+  command += " " + quote(path);
+
+  const pid_t pid = fork();
+  if (pid < 0) return false;
+  if (pid == 0) {
+    execl("/bin/sh", "sh", "-c", command.c_str(), static_cast<char*>(nullptr));
+    _exit(127);
+  }
+  int status = 0;
+  waitpid(pid, &status, 0);
+  return WIFEXITED(status) && WEXITSTATUS(status) == 0;
 }
 
 bool OpenUrl(const std::string& url) {

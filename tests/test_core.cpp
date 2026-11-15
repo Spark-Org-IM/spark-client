@@ -477,7 +477,13 @@ int main() {
             "lastPostedAt": "2026-10-08T09:30:00+00:00",
             "isApproved": true,
             "isSticky": false,
-            "isLocked": false
+            "isLocked": false,
+            "canSticky": true,
+            "canLock": true,
+            "canHide": true,
+            "canDelete": true,
+            "canRename": true,
+            "canTag": true
           },
           "relationships": {
             "lastPostedUser": {"data": {"type": "users", "id": "2"}},
@@ -535,8 +541,15 @@ int main() {
     CHECK(page.items[0].commentCount == 3);
     CHECK(page.items[0].tagNames.size() == 2);
     CHECK(page.items[0].tagNames[0] == "General");
+    CHECK(page.items[0].tagSlugs.size() == 2);
+    CHECK(page.items[0].tagSlugs[0] == "general");
+    CHECK(page.items[0].tagSlugs[1] == "service");
     CHECK(page.items[0].firstPostId == "34");
     CHECK(!page.items[0].sticky);
+    CHECK(page.items[0].canSticky);
+    CHECK(page.items[0].canLock);
+    CHECK(page.items[0].canRename);
+    CHECK(page.items[0].canDelete);
     CHECK(page.items[1].sticky);
     CHECK(page.items[1].locked);
     CHECK(FormatForumDate(page.items[0].lastPostedAt) == "2026-10-08 09:30");

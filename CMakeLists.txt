@@ -32,7 +32,7 @@ find_package(Threads REQUIRED)
 find_package(OpenSSL REQUIRED COMPONENTS SSL Crypto)
 
 if(MSVC)
-  set(SPARK_TUI_WARNING_FLAGS /W4 /permissive-)
+  set(SPARK_TUI_WARNING_FLAGS /W4 /permissive- /utf-8)
 else()
   set(SPARK_TUI_WARNING_FLAGS -Wall -Wextra -Wpedantic)
 endif()

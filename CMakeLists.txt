@@ -174,6 +174,7 @@ if(SPARK_TUI_BUILD_TESTS)
   enable_testing()
   add_executable(spark-tui-tests tests/test_core.cpp)
   target_link_libraries(spark-tui-tests PRIVATE spark_core)
+  target_compile_options(spark-tui-tests PRIVATE ${SPARK_TUI_WARNING_FLAGS})
   add_test(NAME spark-tui-tests COMMAND spark-tui-tests)
 endif()
 

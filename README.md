@@ -281,31 +281,41 @@ Flarum 2.x 的置顶 / 锁定 / 隐藏 / 重命名 / 标签通过
 
 ## CI 与发布（不需要自己的服务器）
 
-项目是桌面 / 终端客户端，发布物是 `.deb`，不需要“目标服务器”做持续部署。
+项目是桌面 / 终端客户端，发布物是 Linux `.deb` / 独立可执行文件和 Windows `.exe`，不需要“目标服务器”做持续部署。
 推荐把 **GitHub Releases 当作分发 CDN**，CI 只负责构建、测试和上传产物：
 
 1. 在 GitHub 建一个公开仓库（例如 `Spark-Org-IM/spark-client`）；
 2. 把当前自建 Git 作为开发源，增加 GitHub remote 并推送：
    ```bash
    git remote add github git@github.com:Spark-Org-IM/spark-client.git
-   git push github dev-261110
+   git push github dev-261115
    ```
-3. `.github/workflows/ci.yml` 会在 push / PR 时自动：
-   - 在 Ubuntu 24.04 上配置 CMake；
-   - 构建并运行单元测试；
-   - 生成 `.deb` 和 `SHA256SUMS`；
-   - 上传为 Actions artifact（保留 90 天）。
+3. `.github/workflows/ci.yml` 会在 push / PR 时自动构建三个目标：
+   - Linux amd64：`.deb` + 独立可执行文件 `.tar.gz`
+   - Linux arm64：`.deb` + 独立可执行文件 `.tar.gz`
+   - Windows amd64：`.zip`（静态链接 OpenSSL，单 exe）
+
+   每个任务都会运行单元测试，并把包上传为 Actions artifact（保留 90 天）。
 4. 发布版本只需要推 tag：
    ```bash
    git tag v0.2.0
    git push github v0.2.0
    ```
-   同一个 workflow 会创建 GitHub Release，并附上 `.deb` 和校验和。
+   同一个 workflow 会创建 GitHub Release，并附上所有平台包和统一的
+   `SHA256SUMS`。
 5. 用户从 Release 页面下载后校验并安装：
    ```bash
    sha256sum -c SHA256SUMS
+
+   # Debian / Ubuntu
    sudo apt install ./spark-tui_0.2.0_amd64.deb
+
+   # 其它 Linux：解压后直接运行
+   tar -xzf spark-tui_0.2.0_linux-amd64.tar.gz
+   ./spark-tui-0.2.0-linux-amd64/spark-tui
    ```
+   Windows 解压 `spark-tui_0.2.0_windows-amd64.zip` 后运行
+   `spark-tui.exe`。
 
 0.x 阶段不使用 beta 后缀：重要测试节点直接打 `v0.2.0`，日常测试不推
 tag，直接使用 Actions artifact 即可。

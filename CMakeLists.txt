@@ -31,6 +31,12 @@ option(SPARK_TUI_USE_SYSTEM_HTTPLIB "Use system cpp-httplib"       OFF)
 find_package(Threads REQUIRED)
 find_package(OpenSSL REQUIRED COMPONENTS SSL Crypto)
 
+if(MSVC)
+  set(SPARK_TUI_WARNING_FLAGS /W4 /permissive-)
+else()
+  set(SPARK_TUI_WARNING_FLAGS -Wall -Wextra -Wpedantic)
+endif()
+
 # ---------------------------------------------------------------------------
 # FTXUI (TUI foundation): prefer a system package, otherwise fetch a pinned
 # release. Debian/Ubuntu ship libftxui-dev (5.0.0 in trixie), which is the
@@ -125,7 +131,11 @@ target_include_directories(spark_core PUBLIC src)
 target_link_libraries(spark_core PUBLIC spark_json spark_httplib PRIVATE spark_toml)
 target_compile_definitions(spark_core PRIVATE
   SPARK_TUI_VERSION="${PROJECT_VERSION}")
-target_compile_options(spark_core PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(spark_core PRIVATE ${SPARK_TUI_WARNING_FLAGS})
+if(WIN32)
+  # OpenUrl uses ShellExecuteA.
+  target_link_libraries(spark_core PUBLIC shell32)
+endif()
 
 # ---------------------------------------------------------------------------
 # Executable
@@ -140,7 +150,7 @@ target_link_libraries(spark-tui PRIVATE
   spark_core ftxui::screen ftxui::dom ftxui::component)
 target_compile_definitions(spark-tui PRIVATE
   SPARK_TUI_VERSION="${PROJECT_VERSION}")
-target_compile_options(spark-tui PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(spark-tui PRIVATE ${SPARK_TUI_WARNING_FLAGS})
 
 # ---------------------------------------------------------------------------
 # Install
@@ -170,6 +180,7 @@ endif()
 # ---------------------------------------------------------------------------
 # CPack (DEB)
 # ---------------------------------------------------------------------------
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 set(CPACK_PACKAGE_NAME            "spark-tui")
 set(CPACK_PACKAGE_VENDOR          "Spark ORG")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY
@@ -197,3 +208,4 @@ endif()
 set(CPACK_DEBIAN_FILE_NAME        DEB-DEFAULT)
 set(CPACK_GENERATOR               "DEB")
 include(CPack)
+endif()

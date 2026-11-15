@@ -18,8 +18,17 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
-    runs-on: ubuntu-24.04
+  linux:
+    name: linux-${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: amd64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     steps:
       - name: Check out
@@ -35,7 +44,7 @@ jobs:
         uses: actions/cache@v6
         with:
           path: build/_deps
-          key: ftxui-${{ runner.os }}-v6.1.9
+          key: ftxui-${{ runner.os }}-${{ matrix.arch }}-v6.1.9
 
       - name: Configure
         run: |
@@ -60,39 +69,133 @@ jobs:
       - name: Test
         run: ctest --test-dir build --output-on-failure
 
-      - name: Package .deb
+      - name: Package .deb and Linux executable
         run: |
           cd build
           cpack -G DEB
-          sha256sum ./*.deb > SHA256SUMS
+          project_version=$(grep '^SPARK_TUI_PROJECT_VERSION:STRING=' CMakeCache.txt | cut -d= -f2)
+          name="spark-tui-${project_version}-linux-${{ matrix.arch }}"
+          mkdir -p "../$name"
+          cp spark-tui "../$name/"
+          cp ../README.md ../LICENSE ../docs/config.example.toml "../$name/"
+          tar -C .. -czf "spark-tui_${project_version}_linux-${{ matrix.arch }}.tar.gz" "$name"
+          sha256sum ./*.deb ./*.tar.gz > "SHA256SUMS-${{ matrix.arch }}"
 
-      - name: Upload package
+      - name: Upload Linux packages
         uses: actions/upload-artifact@v7
         with:
-          name: spark-tui-deb
+          name: spark-tui-linux-${{ matrix.arch }}
           path: |
             build/*.deb
-            build/SHA256SUMS
+            build/*.tar.gz
+            build/SHA256SUMS-${{ matrix.arch }}
+          if-no-files-found: error
+
+  windows:
+    name: windows-amd64
+    runs-on: windows-2025
+    timeout-minutes: 45
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+
+      - name: Cache vcpkg packages
+        uses: actions/cache@v6
+        with:
+          path: build/vcpkg_installed
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}
+
+      - name: Cache FTXUI source (fallback build)
+        uses: actions/cache@v6
+        with:
+          path: build/_deps
+          key: ftxui-${{ runner.os }}-amd64-v6.1.9
+
+      - name: Configure
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $vcpkg = $env:VCPKG_INSTALLATION_ROOT
+          if (-not $vcpkg) { $vcpkg = 'C:\vcpkg' }
+          if (-not (Test-Path "$vcpkg/scripts/buildsystems/vcpkg.cmake")) {
+            throw "vcpkg toolchain not found under $vcpkg"
+          }
+          $args = @(
+            '-S', '.', '-B', 'build',
+            '-G', 'Visual Studio 17 2022', '-A', 'x64',
+            "-DCMAKE_TOOLCHAIN_FILE=$vcpkg/scripts/buildsystems/vcpkg.cmake",
+            '-DVCPKG_TARGET_TRIPLET=x64-windows-static',
+            '-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded',
+            '-DCMAKE_BUILD_TYPE=Release'
+          )
+          if ($env:GITHUB_REF_TYPE -eq 'tag') {
+            $raw = $env:GITHUB_REF_NAME.TrimStart('v')
+            $version = ($raw -split '-')[0]
+            $package = $version
+            if ($raw -ne $version) {
+              $package = "$version~$($raw.Substring($version.Length + 1))"
+            }
+            $args += "-DSPARK_TUI_PROJECT_VERSION=$version"
+            $args += "-DSPARK_TUI_PACKAGE_VERSION=$package"
+          }
+          cmake @args
+
+      - name: Build
+        run: cmake --build build --config Release --parallel 4
+
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: Package Windows executable
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = (Select-String -Path build/CMakeCache.txt -Pattern '^SPARK_TUI_PROJECT_VERSION:STRING=(.+)$').Matches.Groups[1].Value
+          $name = "spark-tui-$version-windows-amd64"
+          $stage = "dist/$name"
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Copy-Item build/Release/spark-tui.exe $stage
+          Copy-Item README.md, LICENSE $stage
+          Copy-Item docs/config.example.toml $stage
+          $zip = "build/spark-tui_${version}_windows-amd64.zip"
+          Compress-Archive -Path $stage -DestinationPath $zip -Force
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
+          "$hash  $(Split-Path $zip -Leaf)" | Out-File -Encoding ascii "build/SHA256SUMS-windows-amd64"
+
+      - name: Upload Windows package
+        uses: actions/upload-artifact@v7
+        with:
+          name: spark-tui-windows-amd64
+          path: |
+            build/*.zip
+            build/SHA256SUMS-windows-amd64
           if-no-files-found: error
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: build
+    needs:
+      - linux
+      - windows
     runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
-      - name: Download package
+      - name: Download packages
         uses: actions/download-artifact@v8
         with:
-          name: spark-tui-deb
+          pattern: spark-tui-*
+          merge-multiple: true
           path: dist
+
+      - name: Generate checksums
+        run: |
+          cd dist
+          rm -f SHA256SUMS-*
+          find . -maxdepth 1 -type f -printf '%f\n' | sort | xargs -r sha256sum > SHA256SUMS
+          cat SHA256SUMS
 
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v3
         with:
-          files: |
-            dist/*.deb
-            dist/SHA256SUMS
+          files: dist/*
           generate_release_notes: true
-          prerelease: ${{ contains(github.ref_name, '-') }}

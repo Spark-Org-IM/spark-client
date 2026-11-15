@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### 构建
+
+- GitHub Actions 多平台矩阵：Linux amd64 / arm64 生成 `.deb` 和独立可执行文件，
+  Windows amd64 生成单 exe 的 `.zip`；
+- push / PR 构建并上传 artifact，`v*` tag 自动汇总发布 Release。
+
 ## 0.2.0
 
 ### 新增

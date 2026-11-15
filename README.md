@@ -87,8 +87,12 @@ SPARK_TUI_NO_SYNC=1 \
 
 ## 配置
 
-默认配置文件：`~/.config/spark-tui/config.toml`
-（可用 `--config` 或 `SPARK_TUI_CONFIG` 覆盖）。
+默认配置文件：`~/.config/spark-tui/config.toml`（可用 `--config` 或
+`SPARK_TUI_CONFIG` 覆盖）。
+
+Windows 下使用 `%APPDATA%\spark-tui\config.toml`；外部编辑器默认
+`notepad`，可用 `EDITOR` / `VISUAL` 覆盖。导入 PGP 公钥需要 `gpg`
+在 `PATH` 中。
 
 ```toml
 [instance]

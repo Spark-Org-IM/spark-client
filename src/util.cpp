@@ -4,9 +4,9 @@
 #define NOMINMAX
 #include <fcntl.h>
 #include <io.h>
-#include <shellapi.h>
 #include <sys/stat.h>
 #include <windows.h>
+#include <shellapi.h>
 #else
 #include <fcntl.h>
 #include <sys/stat.h>

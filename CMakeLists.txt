@@ -32,6 +32,7 @@ include(GNUInstallDirs)
 include(FetchContent)
 
 option(SPARK_TUI_BUILD_TESTS       "Build the unit tests"          ON)
+option(SPARK_TUI_BUILD_GTK         "Build the GTK4/libadwaita frontend" OFF)
 option(SPARK_TUI_USE_SYSTEM_FTXUI  "Require a system-installed FTXUI (no fetch)" OFF)
 option(SPARK_TUI_USE_SYSTEM_JSON   "Use system nlohmann_json"      OFF)
 option(SPARK_TUI_USE_SYSTEM_HTTPLIB "Use system cpp-httplib"       OFF)
@@ -127,6 +128,7 @@ set(SPARK_CORE_SOURCES
   src/util.cpp
   src/i18n.cpp
   src/config.cpp
+  src/platform/session.cpp
   src/service_source.cpp
   src/api/client.cpp
   src/api/models.cpp
@@ -168,6 +170,31 @@ target_link_libraries(spark-tui PRIVATE
 target_compile_definitions(spark-tui PRIVATE
   SPARK_TUI_VERSION="${PROJECT_VERSION}")
 target_compile_options(spark-tui PRIVATE ${SPARK_TUI_WARNING_FLAGS})
+
+# ---------------------------------------------------------------------------
+# GTK / libadwaita frontend (code-only framework; packaging comes later)
+# ---------------------------------------------------------------------------
+if(SPARK_TUI_BUILD_GTK)
+  if(WIN32)
+    message(FATAL_ERROR "SPARK_TUI_BUILD_GTK is currently supported on Linux only")
+  endif()
+  find_package(PkgConfig REQUIRED)
+  pkg_check_modules(GTK4 REQUIRED IMPORTED_TARGET gtk4)
+  pkg_check_modules(ADWAITA REQUIRED IMPORTED_TARGET libadwaita-1)
+
+  add_executable(spark-gui
+    src/gtk/main.cpp
+    src/gtk/application.cpp
+  )
+  target_link_libraries(spark-gui PRIVATE
+    spark_core
+    PkgConfig::GTK4
+    PkgConfig::ADWAITA
+  )
+  target_compile_definitions(spark-gui PRIVATE
+    SPARK_TUI_VERSION="${PROJECT_VERSION}")
+  target_compile_options(spark-gui PRIVATE ${SPARK_TUI_WARNING_FLAGS})
+endif()
 
 # ---------------------------------------------------------------------------
 # Install

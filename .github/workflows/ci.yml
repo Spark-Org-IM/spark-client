@@ -171,6 +171,30 @@ jobs:
             build/SHA256SUMS-windows-${{ matrix.arch }}
           if-no-files-found: error
 
+  gtk:
+    name: gtk-framework
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+
+      - name: Install GTK build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build libssl-dev \
+            libgtk-4-dev libadwaita-1-dev pkg-config
+
+      - name: Configure GTK frontend
+        run: |
+          cmake -S . -B build-gtk -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DSPARK_TUI_BUILD_GTK=ON
+
+      - name: Build GTK frontend
+        run: cmake --build build-gtk --target spark-gui --parallel 4
+
   source:
     name: debian-source
     runs-on: ubuntu-24.04

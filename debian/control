@@ -1,0 +1,17 @@
+Source: spark-tui
+Section: utils
+Priority: optional
+Maintainer: Jianyin Li <jianyin@sparkorg.dpdns.org>
+Build-Depends: debhelper-compat (= 13), cmake, ninja-build, libssl-dev, libftxui-dev
+Standards-Version: 4.7.0
+Rules-Requires-Root: no
+Homepage: https://github.com/Spark-Org-IM/spark-client
+Vcs-Git: https://github.com/Spark-Org-IM/spark-client.git
+Vcs-Browser: https://github.com/Spark-Org-IM/spark-client
+
+Package: spark-tui
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Description: Spark ORG terminal client
+ A terminal client for Spark ORG news, contacts, platforms and the
+ Flarum forum, built with C++20 and FTXUI.

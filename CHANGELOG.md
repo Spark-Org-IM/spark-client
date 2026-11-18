@@ -1,6 +1,16 @@
 # Changelog
 
-## 0.2.0-beta.1
+## Unreleased
+
+### 构建
+
+- GitHub Actions 多平台矩阵：Linux amd64 / arm64 生成 `.deb` 和独立可执行文件，
+  Windows amd64 / arm64 生成单 exe 的 `.zip`；
+- Debian 源码包：`.dsc` + `.orig.tar.gz` + `.debian.tar.xz` + `.changes` + `.buildinfo`；
+- 所有发布文件汇总为 `spark-tui_<version>_all.tar.gz` 总包；
+- push / PR 构建并上传 artifact，`v*` tag 自动汇总发布 Release。
+
+## 0.2.0
 
 ### 新增
 
@@ -12,7 +22,7 @@
 - 服务源变更确认：列出旧值 → 新值，探测 Spark / 论坛令牌；
 - 令牌被拒绝时阻止应用，退出失效登录后引导重新登录；
 - 自动同步遇到新源拒绝令牌时保留旧地址，不再静默登出；
-- GitHub Actions / 极狐 GitLab CI：构建、测试、生成 `.deb`。
+- GitHub Actions：构建、测试、生成 `.deb`。
 
 ### 已知限制
 

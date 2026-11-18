@@ -1,0 +1,5 @@
+spark-tui (0.2.0-1) unstable; urgency=medium
+
+  * Initial Debian packaging.
+
+ -- Jianyin Li <jianyin@sparkorg.dpdns.org>  Wed, 18 Nov 2026 00:00:00 +0800

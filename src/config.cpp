@@ -1,6 +1,8 @@
 #include "config.h"
 
+#ifndef _WIN32
 #include <sys/stat.h>
+#endif
 
 #include <filesystem>
 #include <fstream>
@@ -267,7 +269,16 @@ bool Config::Save() const {
     out << text.str();
     if (!out) return false;
   }
+#ifdef _WIN32
+  // Windows has no POSIX mode bits; keep the file writable by the owner.
+  std::error_code permission_error;
+  std::filesystem::permissions(
+      tmp,
+      std::filesystem::perms::owner_read | std::filesystem::perms::owner_write,
+      std::filesystem::perm_options::replace, permission_error);
+#else
   chmod(tmp.c_str(), S_IRUSR | S_IWUSR);  // 0600: holds a bearer token
+#endif
   std::error_code ec;
   std::filesystem::rename(tmp, target, ec);
   if (ec) {

@@ -886,9 +886,15 @@ void App::StartNewsEdit(bool is_new) {
     char date[32] = "2026-01-01";
     const std::time_t now = std::time(nullptr);
     std::tm local{};
+#ifdef _WIN32
+    if (localtime_s(&local, &now) == 0) {
+      std::strftime(date, sizeof(date), "%Y-%m-%d", &local);
+    }
+#else
     if (localtime_r(&now, &local) != nullptr) {
       std::strftime(date, sizeof(date), "%Y-%m-%d", &local);
     }
+#endif
 
     nlohmann::json data = {
         {"title", titles},

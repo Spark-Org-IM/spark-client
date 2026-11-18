@@ -1,12 +1,22 @@
 #include "util.h"
 
+#ifdef _WIN32
+#define NOMINMAX
+#include <fcntl.h>
+#include <io.h>
+#include <sys/stat.h>
+#include <windows.h>
+#include <shellapi.h>
+#else
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#endif
 
 #include <algorithm>
+#include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -342,19 +352,41 @@ std::optional<std::string> NormalizeUrl(const std::string& raw) {
 }
 
 std::string HomeDir() {
+#ifdef _WIN32
+  const char* profile = std::getenv("USERPROFILE");
+  if (profile != nullptr && *profile != '\0') return std::string(profile);
+  const char* drive = std::getenv("HOMEDRIVE");
+  const char* path = std::getenv("HOMEPATH");
+  if (drive != nullptr && path != nullptr) {
+    return std::string(drive) + path;
+  }
+  const char* temp = std::getenv("TEMP");
+  return temp != nullptr ? std::string(temp) : std::string(".");
+#else
   const char* home = std::getenv("HOME");
   return home != nullptr ? std::string(home) : std::string("/tmp");
+#endif
 }
 
 std::string ConfigDir() {
+#ifdef _WIN32
+  const char* appdata = std::getenv("APPDATA");
+  if (appdata != nullptr && *appdata != '\0') {
+    return (std::filesystem::path(appdata) / "spark-tui").string();
+  }
+  return (std::filesystem::path(HomeDir()) / ".config" / "spark-tui").string();
+#else
   const char* xdg = std::getenv("XDG_CONFIG_HOME");
   if (xdg != nullptr && *xdg != '\0') {
-    return std::string(xdg) + "/spark-tui";
+    return (std::filesystem::path(xdg) / "spark-tui").string();
   }
-  return HomeDir() + "/.config/spark-tui";
+  return (std::filesystem::path(HomeDir()) / ".config" / "spark-tui").string();
+#endif
 }
 
-std::string DefaultConfigPath() { return ConfigDir() + "/config.toml"; }
+std::string DefaultConfigPath() {
+  return (std::filesystem::path(ConfigDir()) / "config.toml").string();
+}
 
 bool EnsureDirectory(const std::string& path) {
   std::error_code ec;
@@ -370,24 +402,45 @@ std::optional<std::string> WriteTempFile(const std::string& prefix,
   std::vector<char> path(pattern.begin(), pattern.end());
   path.push_back('\0');
 
+#ifdef _WIN32
+  if (_mktemp_s(path.data(), path.size()) != 0) return std::nullopt;
+  const int fd = _open(path.data(),
+                       _O_CREAT | _O_EXCL | _O_WRONLY | _O_BINARY,
+                       _S_IREAD | _S_IWRITE);
+#else
   const int fd = mkstemp(path.data());
+  if (fd >= 0) chmod(path.data(), S_IRUSR | S_IWUSR);
+#endif
   if (fd < 0) return std::nullopt;
-  chmod(path.data(), S_IRUSR | S_IWUSR);
 
   std::size_t offset = 0;
   bool ok = true;
   while (offset < content.size()) {
-    const ssize_t written =
-        write(fd, content.data() + offset, content.size() - offset);
+    const std::size_t remaining = content.size() - offset;
+    const std::size_t chunk = std::min<std::size_t>(remaining, 1 << 20);
+#ifdef _WIN32
+    const int written = _write(fd, content.data() + offset,
+                               static_cast<unsigned int>(chunk));
+#else
+    const ssize_t written = write(fd, content.data() + offset, chunk);
+#endif
     if (written <= 0) {
       ok = false;
       break;
     }
     offset += static_cast<std::size_t>(written);
   }
+#ifdef _WIN32
+  _close(fd);
+#else
   close(fd);
+#endif
   if (!ok) {
+#ifdef _WIN32
+    _unlink(path.data());
+#else
     unlink(path.data());
+#endif
     return std::nullopt;
   }
   return std::string(path.data());
@@ -404,6 +457,23 @@ std::string ReadTextFile(const std::string& path) {
 bool EditFile(const std::string& path) {
   const char* visual = std::getenv("VISUAL");
   const char* editor = std::getenv("EDITOR");
+#ifdef _WIN32
+  std::string command = visual != nullptr && *visual != '\0'
+                            ? visual
+                        : editor != nullptr && *editor != '\0' ? editor
+                                                               : "notepad";
+  std::string quoted = "\"";
+  for (char c : path) {
+    if (c == '\"') {
+      quoted += "\\\"";
+    } else {
+      quoted += c;
+    }
+  }
+  quoted += "\"";
+  command += " " + quoted;
+  return std::system(command.c_str()) == 0;
+#else
   std::string command = visual != nullptr && *visual != '\0'
                             ? visual
                         : editor != nullptr && *editor != '\0' ? editor
@@ -432,9 +502,15 @@ bool EditFile(const std::string& path) {
   int status = 0;
   waitpid(pid, &status, 0);
   return WIFEXITED(status) && WEXITSTATUS(status) == 0;
+#endif
 }
 
 bool OpenUrl(const std::string& url) {
+#ifdef _WIN32
+  const auto result = ShellExecuteA(nullptr, "open", url.c_str(), nullptr,
+                                    nullptr, SW_SHOWNORMAL);
+  return reinterpret_cast<std::intptr_t>(result) > 32;
+#else
   const pid_t pid = fork();
   if (pid < 0) return false;
   if (pid == 0) {
@@ -444,61 +520,46 @@ bool OpenUrl(const std::string& url) {
   int status = 0;
   waitpid(pid, &status, WNOHANG);
   return true;
+#endif
 }
 
 bool ImportPgpKey(const std::string& key) {
   if (Trim(key).empty()) return false;
 
-  const std::filesystem::path directory = std::filesystem::temp_directory_path();
-  std::string template_path =
-      (directory / "spark-tui-pgp-XXXXXX").string();
-  std::vector<char> path(template_path.begin(), template_path.end());
-  path.push_back('\0');
-
-  const int fd = mkstemp(path.data());
-  if (fd < 0) return false;
-
   std::string data = key;
   if (data.back() != '\n') data.push_back('\n');
+  const auto path = WriteTempFile("spark-tui-pgp", data);
+  if (!path) return false;
 
-  bool written = true;
-  std::size_t offset = 0;
-  while (offset < data.size()) {
-    const ssize_t count = write(fd, data.data() + offset, data.size() - offset);
-    if (count <= 0) {
-      written = false;
-      break;
+#ifdef _WIN32
+  std::string quoted = "\"";
+  for (char c : *path) {
+    if (c == '\"') {
+      quoted += "\\\"";
+    } else {
+      quoted += c;
     }
-    offset += static_cast<std::size_t>(count);
   }
-  close(fd);
-  if (!written) {
-    unlink(path.data());
-    return false;
-  }
-
-  const pid_t pid = fork();
-  if (pid < 0) {
-    unlink(path.data());
-    return false;
-  }
-  if (pid == 0) {
-    // Keep gpg's chatter off the TUI screen; the status line reports the
-    // outcome instead.
-    const int null_fd = open("/dev/null", O_WRONLY);
-    if (null_fd >= 0) {
-      dup2(null_fd, STDOUT_FILENO);
-      dup2(null_fd, STDERR_FILENO);
-      if (null_fd > STDERR_FILENO) close(null_fd);
+  quoted += "\"";
+  const std::string command =
+      "gpg --import " + quoted + " >NUL 2>&1";
+#else
+  std::string quoted = "'";
+  for (char c : *path) {
+    if (c == '\'') {
+      quoted += "'\\''";
+    } else {
+      quoted += c;
     }
-    execlp("gpg", "gpg", "--import", path.data(), static_cast<char*>(nullptr));
-    _exit(127);
   }
-
-  int status = 0;
-  waitpid(pid, &status, 0);
-  unlink(path.data());
-  return WIFEXITED(status) && WEXITSTATUS(status) == 0;
+  quoted += "'";
+  const std::string command =
+      "gpg --import " + quoted + " >/dev/null 2>&1";
+#endif
+  const int status = std::system(command.c_str());
+  std::error_code ec;
+  std::filesystem::remove(*path, ec);
+  return status == 0;
 }
 
 }  // namespace spark

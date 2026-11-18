@@ -57,7 +57,7 @@ std::optional<std::string> NormalizeUrl(const std::string& raw);
 
 // Filesystem / process ------------------------------------------------------
 std::string HomeDir();
-std::string ConfigDir();                 // $XDG_CONFIG_HOME/spark-tui
+std::string ConfigDir();                 // $XDG_CONFIG_HOME or %APPDATA%
 std::string DefaultConfigPath();         // ConfigDir()/config.toml
 bool EnsureDirectory(const std::string& path);
 bool OpenUrl(const std::string& url);
@@ -66,12 +66,12 @@ bool OpenUrl(const std::string& url);
 std::optional<std::string> WriteTempFile(const std::string& prefix,
                                          const std::string& content);
 std::string ReadTextFile(const std::string& path);
-// Opens `path` with $VISUAL / $EDITOR (default: vi) and waits for it.
+// Opens `path` with $VISUAL / $EDITOR (vi / notepad) and waits for it.
 bool EditFile(const std::string& path);
 
 // Imports an ASCII-armored PGP public key with `gpg --import`. The key is
-// written to a private temporary file first, so no shell quoting is involved.
-// Returns false when gpg is missing or rejects the key.
+// written to a private temporary file first. Returns false when gpg is missing
+// or rejects the key.
 bool ImportPgpKey(const std::string& key);
 
 }  // namespace spark

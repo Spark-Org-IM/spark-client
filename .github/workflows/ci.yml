@@ -18,11 +18,21 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
-    runs-on: ubuntu-24.04
+  linux:
+    name: linux-${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: amd64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
     steps:
       - name: Check out
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install build dependencies
         run: |
@@ -31,10 +41,10 @@ jobs:
             build-essential cmake ninja-build libssl-dev dpkg-dev
 
       - name: Cache FTXUI source (fallback build)
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: build/_deps
-          key: ftxui-${{ runner.os }}-v6.1.9
+          key: ftxui-${{ runner.os }}-${{ matrix.arch }}-v6.1.9
 
       - name: Configure
         run: |
@@ -42,56 +52,224 @@ jobs:
           if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
             raw="${GITHUB_REF_NAME#v}"
             version="${raw%%-*}"
-            package="${version}"
-            if [ "${raw}" != "${version}" ]; then
-              package="${version}~${raw#*-}"
-            fi
             args+=(
               "-DSPARK_TUI_PROJECT_VERSION=${version}"
-              "-DSPARK_TUI_PACKAGE_VERSION=${package}"
+              "-DSPARK_TUI_PACKAGE_VERSION=${version}-1"
             )
+          else
+            args+=("-DSPARK_TUI_PACKAGE_VERSION=$(dpkg-parsechangelog -SVersion)")
           fi
           cmake "${args[@]}"
 
       - name: Build
-        run: cmake --build build --parallel "$(nproc)"
+        run: cmake --build build --parallel 4
 
       - name: Test
         run: ctest --test-dir build --output-on-failure
 
-      - name: Package .deb
+      - name: Package .deb and Linux executable
         run: |
           cd build
           cpack -G DEB
-          sha256sum ./*.deb > SHA256SUMS
+          project_version=$(grep '^SPARK_TUI_PROJECT_VERSION:STRING=' CMakeCache.txt | cut -d= -f2)
+          name="spark-tui-${project_version}-linux-${{ matrix.arch }}"
+          mkdir -p "../$name"
+          cp spark-tui "../$name/"
+          cp ../README.md ../LICENSE ../docs/config.example.toml "../$name/"
+          tar -C .. -czf "spark-tui_${project_version}_linux-${{ matrix.arch }}.tar.gz" "$name"
+          sha256sum ./*.deb ./*.tar.gz > "SHA256SUMS-${{ matrix.arch }}"
 
-      - name: Upload package
-        uses: actions/upload-artifact@v4
+      - name: Upload Linux packages
+        uses: actions/upload-artifact@v7
         with:
-          name: spark-tui-deb
+          name: spark-tui-linux-${{ matrix.arch }}
           path: |
             build/*.deb
-            build/SHA256SUMS
+            build/*.tar.gz
+            build/SHA256SUMS-${{ matrix.arch }}
+          if-no-files-found: error
+
+  windows:
+    name: windows-${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-2022
+            arch: amd64
+            generator_arch: x64
+            triplet: x64-windows-static
+          - runner: windows-11-arm
+            arch: arm64
+            generator_arch: arm64
+            triplet: arm64-windows-static
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+
+      - name: Cache vcpkg packages
+        uses: actions/cache@v6
+        with:
+          path: build/vcpkg_installed
+          key: vcpkg-${{ runner.os }}-${{ matrix.arch }}-${{ hashFiles('vcpkg.json') }}
+
+      - name: Cache FTXUI source (fallback build)
+        uses: actions/cache@v6
+        with:
+          path: build/_deps
+          key: ftxui-${{ runner.os }}-${{ matrix.arch }}-v6.1.9
+
+      - name: Configure
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $vcpkg = $env:VCPKG_INSTALLATION_ROOT
+          if (-not $vcpkg) { $vcpkg = 'C:\vcpkg' }
+          if (-not (Test-Path "$vcpkg/scripts/buildsystems/vcpkg.cmake")) {
+            throw "vcpkg toolchain not found under $vcpkg"
+          }
+          $args = @(
+            '-S', '.', '-B', 'build',
+            '-A', '${{ matrix.generator_arch }}',
+            "-DCMAKE_TOOLCHAIN_FILE=$vcpkg/scripts/buildsystems/vcpkg.cmake",
+            '-DVCPKG_TARGET_TRIPLET=${{ matrix.triplet }}',
+            '-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded',
+            '-DCMAKE_BUILD_TYPE=Release'
+          )
+          if ($env:GITHUB_REF_TYPE -eq 'tag') {
+            $raw = $env:GITHUB_REF_NAME.TrimStart('v')
+            $version = ($raw -split '-')[0]
+            $package = $version
+            if ($raw -ne $version) {
+              $package = "$version~$($raw.Substring($version.Length + 1))"
+            }
+            $args += "-DSPARK_TUI_PROJECT_VERSION=$version"
+            $args += "-DSPARK_TUI_PACKAGE_VERSION=$package"
+          }
+          cmake @args
+
+      - name: Build
+        run: cmake --build build --config Release --parallel 4
+
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: Package Windows executable
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = (Select-String -Path build/CMakeCache.txt -Pattern '^SPARK_TUI_PROJECT_VERSION:STRING=(.+)$').Matches.Groups[1].Value
+          $name = "spark-tui-$version-windows-${{ matrix.arch }}"
+          $stage = "dist/$name"
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Copy-Item build/Release/spark-tui.exe $stage
+          Copy-Item -Path README.md,LICENSE -Destination $stage
+          Copy-Item docs/config.example.toml $stage
+          $zip = "build/spark-tui_${version}_windows-${{ matrix.arch }}.zip"
+          Compress-Archive -Path $stage -DestinationPath $zip -Force
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
+          "$hash  $(Split-Path $zip -Leaf)" | Out-File -Encoding ascii "build/SHA256SUMS-windows-${{ matrix.arch }}"
+
+      - name: Upload Windows package
+        uses: actions/upload-artifact@v7
+        with:
+          name: spark-tui-windows-${{ matrix.arch }}
+          path: |
+            build/*.zip
+            build/SHA256SUMS-windows-${{ matrix.arch }}
+          if-no-files-found: error
+
+  source:
+    name: debian-source
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+
+      - name: Install source packaging tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends dpkg-dev
+
+      - name: Build Debian source package
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            raw="${GITHUB_REF_NAME#v}"
+            if [[ "${raw}" == *-* ]]; then
+              upstream="${raw%%-*}"
+              suffix="${raw#*-}"
+              version="${upstream}~${suffix}-1"
+            else
+              version="${raw}-1"
+            fi
+          else
+            version=$(dpkg-parsechangelog -SVersion)
+          fi
+          packaging/build-source.sh "${version}"
+
+      - name: Checksums
+        run: |
+          cd build/source
+          sha256sum ./*.dsc ./*.orig.tar.* ./*.debian.tar.* ./*.changes ./*.buildinfo > SHA256SUMS-source
+
+      - name: Upload source package
+        uses: actions/upload-artifact@v7
+        with:
+          name: spark-tui-source
+          path: build/source/*
           if-no-files-found: error
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: build
+    needs:
+      - linux
+      - windows
+      - source
     runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
-      - name: Download package
-        uses: actions/download-artifact@v4
+      - name: Download packages
+        uses: actions/download-artifact@v8
         with:
-          name: spark-tui-deb
+          pattern: spark-tui-*
+          merge-multiple: true
           path: dist
 
+      - name: Create release bundle
+        run: |
+          set -eu
+          cd dist
+          rm -f SHA256SUMS* spark-tui_*_all.tar.gz
+          version="${GITHUB_REF_NAME#v}"
+          folder="spark-tui-${version}"
+          rm -rf "../bundle"
+          mkdir -p "../bundle/${folder}"
+          cp ./*.deb ./*.zip ./*.dsc ./*.orig.tar.* ./*.debian.tar.* \
+             ./*.changes ./*.buildinfo ./*_linux-*.tar.gz \
+             "../bundle/${folder}/"
+          (
+            cd "../bundle/${folder}"
+            find . -maxdepth 1 -type f -printf '%f\n' | sort \
+              | xargs -r sha256sum > /tmp/spark-tui-bundle-SHA256SUMS
+            mv /tmp/spark-tui-bundle-SHA256SUMS SHA256SUMS
+          )
+          tar -C ../bundle -czf "spark-tui_${version}_all.tar.gz" "${folder}"
+
+      - name: Generate checksums
+        run: |
+          cd dist
+          rm -f SHA256SUMS*
+          find . -maxdepth 1 -type f -printf '%f\n' | sort \
+            | xargs -r sha256sum > /tmp/spark-tui-SHA256SUMS
+          mv /tmp/spark-tui-SHA256SUMS SHA256SUMS
+          cat SHA256SUMS
+
       - name: Publish GitHub release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
-          files: |
-            dist/*.deb
-            dist/SHA256SUMS
+          files: dist/*
           generate_release_notes: true
-          prerelease: ${{ contains(github.ref_name, '-') }}

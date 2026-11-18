@@ -87,8 +87,12 @@ SPARK_TUI_NO_SYNC=1 \
 
 ## 配置
 
-默认配置文件：`~/.config/spark-tui/config.toml`
-（可用 `--config` 或 `SPARK_TUI_CONFIG` 覆盖）。
+默认配置文件：`~/.config/spark-tui/config.toml`（可用 `--config` 或
+`SPARK_TUI_CONFIG` 覆盖）。
+
+Windows 下使用 `%APPDATA%\spark-tui\config.toml`；外部编辑器默认
+`notepad`，可用 `EDITOR` / `VISUAL` 覆盖。导入 PGP 公钥需要 `gpg`
+在 `PATH` 中。
 
 ```toml
 [instance]
@@ -281,35 +285,62 @@ Flarum 2.x 的置顶 / 锁定 / 隐藏 / 重命名 / 标签通过
 
 ## CI 与发布（不需要自己的服务器）
 
-项目是桌面 / 终端客户端，发布物是 `.deb`，不需要“目标服务器”做持续部署。
+项目是桌面 / 终端客户端，发布物是 Linux `.deb` / 独立可执行文件和 Windows `.exe`，不需要“目标服务器”做持续部署。
 推荐把 **GitHub Releases 当作分发 CDN**，CI 只负责构建、测试和上传产物：
 
-1. 在 GitHub 建一个公开仓库（例如 `Spark-Org/spark-client`）；
+1. 在 GitHub 建一个公开仓库（例如 `Spark-Org-IM/spark-client`）；
 2. 把当前自建 Git 作为开发源，增加 GitHub remote 并推送：
    ```bash
-   git remote add github git@github.com:Spark-Org/spark-client.git
-   git push github dev-261110
+   git remote add github git@github.com:Spark-Org-IM/spark-client.git
+   git push github dev-261115
    ```
-3. `.github/workflows/ci.yml` 会在 push / PR 时自动：
-   - 在 Ubuntu 24.04 上配置 CMake；
-   - 构建并运行单元测试；
-   - 生成 `.deb` 和 `SHA256SUMS`；
-   - 上传为 Actions artifact（保留 90 天）。
+3. `.github/workflows/ci.yml` 会在 push / PR 时自动构建四类产物：
+   - Linux amd64：`.deb` + 独立可执行文件 `.tar.gz`
+   - Linux arm64：`.deb` + 独立可执行文件 `.tar.gz`
+   - Windows amd64 / arm64：`.zip`（静态链接 OpenSSL，单 exe）
+   - Debian 源码包：`.dsc` + `.orig.tar.gz` + `.debian.tar.xz` + `.changes` + `.buildinfo`
+
+   每个任务都会运行单元测试 / 打包检查，并把产物上传为 Actions artifact
+   （保留 90 天）。
 4. 发布版本只需要推 tag：
    ```bash
-   git tag v0.2.0-beta.1
-   git push github v0.2.0-beta.1
+   git tag v0.2.0
+   git push github v0.2.0
    ```
-   同一个 workflow 会创建 GitHub Release，并附上 `.deb` 和校验和。
+   同一个 workflow 会创建 GitHub Release，并附上所有平台包和统一的
+   `SHA256SUMS`。
 5. 用户从 Release 页面下载后校验并安装：
    ```bash
    sha256sum -c SHA256SUMS
-   sudo apt install ./spark-tui_0.2.0_amd64.deb
+
+   # Debian / Ubuntu
+   sudo apt install ./spark-tui_0.2.0-1_amd64.deb
+
+   # 其它 Linux：解压后直接运行
+   tar -xzf spark-tui_0.2.0_linux-amd64.tar.gz
+   ./spark-tui-0.2.0-linux-amd64/spark-tui
+   ```
+   Windows 解压 `spark-tui_0.2.0_windows-amd64.zip` 或
+   `spark-tui_0.2.0_windows-arm64.zip` 后运行 `spark-tui.exe`。
+
+   所有发布文件还会打成一个总包
+   `spark-tui_0.2.0_all.tar.gz`，解压后是 `spark-tui-0.2.0/` 文件夹，
+   包含 `.deb`、Windows zip、Linux tar、源码包、`.changes`、`.buildinfo`
+   和内部 `SHA256SUMS`，可以直接作为手动导入 deb 源的目录。
+
+   Debian 源码包（`.dsc` / `.orig.tar.*` / `.debian.tar.*` / `.changes` /
+   `.buildinfo` 都在同一个 artifact 里，文件名带 `0.2.0-1` 版本号）：
+   ```bash
+   dpkg-source -x spark-tui_0.2.0-1.dsc
+   cd spark-tui-0.2.0
+   dpkg-buildpackage -us -uc
    ```
 
-测试版 tag 使用 `v0.2.0-beta.1` 这类格式，workflow 会标记为 pre-release，
-`.deb` 版本写成 `0.2.0~beta.1`，不会覆盖稳定版。返回稳定版时推送
-`v0.2.0` 即可。
+   CI 生成源码包时使用 `dpkg-buildpackage -S -us -uc -sa`；`-sa` 会把
+   `orig.tar.*` 一并写进 `.changes`。
+
+0.x 阶段不使用 beta 后缀：重要测试节点直接打 `v0.2.0`，日常测试不推
+tag，直接使用 Actions artifact 即可。
 
 GitHub Actions 对公开仓库的标准 Linux runner **不计分钟数**；私有仓库
 免费额度是每月 2,000 分钟。当前项目一次完整构建通常几分钟，公开仓库
@@ -320,16 +351,14 @@ GitHub Actions 对公开仓库的标准 Linux runner **不计分钟数**；私�
 > “Read and write permissions” 即可；workflow 本身已经声明了
 > `contents: write`。
 
-如果国内访问 GitHub Actions / Releases 较慢，可以把仓库镜像到
-[jihulab.com](https://jihulab.com)，使用仓库内的 `.gitlab-ci.yml`：
+GitHub Actions 是唯一的 CI。极狐 GitLab 如果只作为国内镜像，就不要放
+`.gitlab-ci.yml`，否则它的共享 runner 会重复跑同一套构建；之前已经因为
+`job_execution_timeout` 失败过一次，所以仓库里不再保留 GitLab CI 配置。
 
-- 极狐 GitLab 公开项目共享 runner 额度约为每月 50,000 分钟；
-- 私有项目约为每月 400 分钟；
-- 流水线使用 `debian:trixie` 镜像和系统 `libftxui-dev`，产物在
-  pipeline 的 artifact 中保留 30 天。
-
-这是免费额度，不是“无限永久免费”；但对这个项目每月几十次构建绰绰有余。
-GitHub 作为主 CI，JihuLab 作为国内快速镜像 / 备用 CI 即可。
+自建 Gitea 只做代码托管。仓库里的 `.gitea/workflows/README.md` 会让
+Gitea 忽略 `.github/workflows`，避免在没有 runner 时出现
+`Waiting to run` 队列；如果仍然排队，到仓库设置关闭 Actions 单元并取消
+旧任务。
 
 > 如果以后需要 `apt upgrade` 自动更新，可以在 GitHub Pages 上放一个
 > 用 `reprepro` / `aptly` 生成的静态 APT 仓库；当前阶段用 Releases +

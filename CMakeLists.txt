@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.20)
 # CI stamps these from the release tag. The project version must stay numeric;
 # the package version may use Debian's tilde suffix (`0.2.0~beta.1`).
 set(SPARK_TUI_PROJECT_VERSION "0.2.0" CACHE STRING "spark-tui version")
-set(SPARK_TUI_PACKAGE_VERSION "${SPARK_TUI_PROJECT_VERSION}"
+set(SPARK_TUI_PACKAGE_VERSION "${SPARK_TUI_PROJECT_VERSION}-1"
     CACHE STRING "spark-tui package version")
 project(spark-tui VERSION ${SPARK_TUI_PROJECT_VERSION} LANGUAGES CXX)
 
@@ -30,6 +30,12 @@ option(SPARK_TUI_USE_SYSTEM_HTTPLIB "Use system cpp-httplib"       OFF)
 
 find_package(Threads REQUIRED)
 find_package(OpenSSL REQUIRED COMPONENTS SSL Crypto)
+
+if(MSVC)
+  set(SPARK_TUI_WARNING_FLAGS /W4 /permissive- /utf-8)
+else()
+  set(SPARK_TUI_WARNING_FLAGS -Wall -Wextra -Wpedantic)
+endif()
 
 # ---------------------------------------------------------------------------
 # FTXUI (TUI foundation): prefer a system package, otherwise fetch a pinned
@@ -125,7 +131,11 @@ target_include_directories(spark_core PUBLIC src)
 target_link_libraries(spark_core PUBLIC spark_json spark_httplib PRIVATE spark_toml)
 target_compile_definitions(spark_core PRIVATE
   SPARK_TUI_VERSION="${PROJECT_VERSION}")
-target_compile_options(spark_core PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(spark_core PRIVATE ${SPARK_TUI_WARNING_FLAGS})
+if(WIN32)
+  # OpenUrl uses ShellExecuteA.
+  target_link_libraries(spark_core PUBLIC shell32)
+endif()
 
 # ---------------------------------------------------------------------------
 # Executable
@@ -140,7 +150,7 @@ target_link_libraries(spark-tui PRIVATE
   spark_core ftxui::screen ftxui::dom ftxui::component)
 target_compile_definitions(spark-tui PRIVATE
   SPARK_TUI_VERSION="${PROJECT_VERSION}")
-target_compile_options(spark-tui PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(spark-tui PRIVATE ${SPARK_TUI_WARNING_FLAGS})
 
 # ---------------------------------------------------------------------------
 # Install
@@ -164,12 +174,14 @@ if(SPARK_TUI_BUILD_TESTS)
   enable_testing()
   add_executable(spark-tui-tests tests/test_core.cpp)
   target_link_libraries(spark-tui-tests PRIVATE spark_core)
+  target_compile_options(spark-tui-tests PRIVATE ${SPARK_TUI_WARNING_FLAGS})
   add_test(NAME spark-tui-tests COMMAND spark-tui-tests)
 endif()
 
 # ---------------------------------------------------------------------------
 # CPack (DEB)
 # ---------------------------------------------------------------------------
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 set(CPACK_PACKAGE_NAME            "spark-tui")
 set(CPACK_PACKAGE_VENDOR          "Spark ORG")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY
@@ -197,3 +209,4 @@ endif()
 set(CPACK_DEBIAN_FILE_NAME        DEB-DEFAULT)
 set(CPACK_GENERATOR               "DEB")
 include(CPack)
+endif()

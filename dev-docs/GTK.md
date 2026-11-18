@@ -43,8 +43,8 @@ src/
 
 二进制名建议直接分开：
 
-- `spark-tui`：终端前端，行为不变；
-- `spark-gui`：GTK 前端；
+- `sparkapp-tui`：终端前端，行为不变；
+- `sparkapp-gui`：GTK 前端；
 - 可选 `spark`：只做 `auto` 判断并转发到上面两个之一。
 
 分开二进制比“一个 exe 同时塞 FTXUI 和 GTK”更容易打包、测试和排查问题。
@@ -283,8 +283,8 @@ GUI 还需要 AppStream 元数据 `packaging/spark-gui.metainfo.xml`，包含
 
 Debian 打包建议拆成两个二进制包：
 
-- `spark-tui`：TUI，不依赖 GTK；
-- `spark-gui`：GTK 前端，依赖 GTK4 / libadwaita；
+- `sparkapp-tui`：TUI，依赖 `sparkapp-core`，不依赖 GTK；
+- `sparkapp-gui`：GTK 前端，依赖 `sparkapp-core` + GTK4 / libadwaita；
 - 两者共享同一个 `spark_core` 源码和配置目录，但可以独立安装。
 
 如果暂时只做一个包，至少把 GUI 依赖放到 `Recommends`，不要让只想用 TUI 的
@@ -470,7 +470,7 @@ xvfb-run -a ./build/spark-gui
 3. **登录与详情**：复用 `ApiClient` / `ForumClient`，完成登录、详情、
    搜索、分页；
 4. **管理功能**：新闻管理、论坛管理、回复、发主题、API 工具；
-5. **打包**：拆 `spark-tui` / `spark-gui` 二进制包，补 desktop、
+5. **打包**：拆 `sparkapp-core` / `sparkapp-tui` / `sparkapp-gui` 二进制包，补 desktop、
    metainfo、图标和 CI；
 6. **UI 模式检测**：最后加 `spark` 启动器或 `--ui=auto`，不要在最小 GUI
    阶段就把启动逻辑做复杂。

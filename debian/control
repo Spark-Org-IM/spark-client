@@ -9,9 +9,18 @@ Homepage: https://github.com/Spark-Org-IM/spark-client
 Vcs-Git: https://github.com/Spark-Org-IM/spark-client.git
 Vcs-Browser: https://github.com/Spark-Org-IM/spark-client
 
-Package: spark-tui
+Package: sparkapp-core
 Architecture: any
+Section: libs
 Depends: ${shlibs:Depends}, ${misc:Depends}
+Description: shared core library for Spark ORG clients
+ Common configuration, Spark ORG API, Flarum API and service-source logic
+ used by the Spark ORG terminal and GTK frontends.
+
+Package: sparkapp-tui
+Architecture: any
+Section: utils
+Depends: sparkapp-core (= ${binary:Version}), ${shlibs:Depends}, ${misc:Depends}
 Description: Spark ORG terminal client
  A terminal client for Spark ORG news, contacts, platforms and the
  Flarum forum, built with C++20 and FTXUI.

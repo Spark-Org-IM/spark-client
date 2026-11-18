@@ -123,7 +123,7 @@ endif()
 # ---------------------------------------------------------------------------
 # Core library (config, HTTP, API models) — no FTXUI dependency
 # ---------------------------------------------------------------------------
-add_library(spark_core STATIC
+set(SPARK_CORE_SOURCES
   src/util.cpp
   src/i18n.cpp
   src/config.cpp
@@ -135,6 +135,15 @@ add_library(spark_core STATIC
   src/forum/render.cpp
   src/ui/render_detail.cpp
 )
+if(UNIX AND NOT APPLE)
+  add_library(spark_core SHARED ${SPARK_CORE_SOURCES})
+  set_target_properties(spark_core PROPERTIES
+    OUTPUT_NAME sparkapp-core
+    VERSION ${PROJECT_VERSION}
+    SOVERSION 0)
+else()
+  add_library(spark_core STATIC ${SPARK_CORE_SOURCES})
+endif()
 target_include_directories(spark_core PUBLIC src)
 target_link_libraries(spark_core PUBLIC spark_json spark_httplib PRIVATE spark_toml)
 target_compile_definitions(spark_core PRIVATE
@@ -163,17 +172,18 @@ target_compile_options(spark-tui PRIVATE ${SPARK_TUI_WARNING_FLAGS})
 # ---------------------------------------------------------------------------
 # Install
 # ---------------------------------------------------------------------------
-install(TARGETS spark-tui RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+install(TARGETS spark_core
+        LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}" COMPONENT core
+        ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}" COMPONENT core
+        RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}" COMPONENT core)
+install(TARGETS spark-tui
+        RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}" COMPONENT tui)
 install(FILES packaging/spark-tui.desktop
-        DESTINATION "${CMAKE_INSTALL_DATADIR}/applications")
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/applications"
+        COMPONENT tui)
 install(FILES packaging/spark-tui.svg
-        DESTINATION "${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps")
-install(DIRECTORY docs/api-v2
-        DESTINATION "${CMAKE_INSTALL_DATADIR}/doc/spark-tui")
-install(FILES README.md LICENSE
-        DESTINATION "${CMAKE_INSTALL_DATADIR}/doc/spark-tui")
-install(FILES docs/config.example.toml
-        DESTINATION "${CMAKE_INSTALL_DATADIR}/doc/spark-tui")
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps"
+        COMPONENT tui)
 
 # ---------------------------------------------------------------------------
 # Tests
@@ -201,18 +211,29 @@ set(CPACK_DEBIAN_PACKAGE_SECTION  "utils")
 set(CPACK_DEBIAN_PACKAGE_PRIORITY "optional")
 option(SPARK_TUI_DEB_SHLIBDEPS
        "Let dpkg-shlibdeps compute the runtime dependencies" ON)
+
+set(CPACK_DEB_COMPONENT_INSTALL ON)
+set(CPACK_COMPONENTS_ALL core tui)
+set(CPACK_DEBIAN_CORE_PACKAGE_NAME "sparkapp-core")
+set(CPACK_DEBIAN_TUI_PACKAGE_NAME  "sparkapp-tui")
+
 if(SPARK_TUI_DEB_SHLIBDEPS)
-  set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
-  # Let dpkg-shlibdeps compute all runtime dependencies (OpenSSL, FTXUI, ...).
-  set(CPACK_DEBIAN_PACKAGE_DEPENDS "")
-else()
-  set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS OFF)
-  set(_spark_deb_depends "libc6, libstdc++6, libssl3t64 | libssl3")
+  set(CPACK_DEBIAN_CORE_PACKAGE_SHLIBDEPS ON)
+  set(CPACK_DEBIAN_TUI_PACKAGE_SHLIBDEPS OFF)
+  set(_spark_tui_depends "sparkapp-core (= ${CPACK_PACKAGE_VERSION}), libc6, libstdc++6")
   if(SPARK_TUI_FTXUI_FROM_SYSTEM)
-    string(APPEND _spark_deb_depends
+    string(APPEND _spark_tui_depends
       ", libftxui-screen5.0.0, libftxui-dom5.0.0, libftxui-component5.0.0")
   endif()
-  set(CPACK_DEBIAN_PACKAGE_DEPENDS "${_spark_deb_depends}")
+  set(CPACK_DEBIAN_TUI_PACKAGE_DEPENDS "${_spark_tui_depends}")
+  set(CPACK_DEBIAN_CORE_PACKAGE_DEPENDS "")
+else()
+  set(CPACK_DEBIAN_CORE_PACKAGE_SHLIBDEPS OFF)
+  set(CPACK_DEBIAN_TUI_PACKAGE_SHLIBDEPS OFF)
+  set(CPACK_DEBIAN_CORE_PACKAGE_DEPENDS
+      "libc6, libstdc++6, libssl3t64 | libssl3")
+  set(CPACK_DEBIAN_TUI_PACKAGE_DEPENDS
+      "sparkapp-core (= ${CPACK_PACKAGE_VERSION}), libc6, libstdc++6")
 endif()
 set(CPACK_DEBIAN_FILE_NAME        DEB-DEFAULT)
 set(CPACK_GENERATOR               "DEB")

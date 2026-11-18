@@ -297,8 +297,8 @@ Flarum 2.x 的置顶 / 锁定 / 隐藏 / 重命名 / 标签通过
    git push origin <branch>
    ```
 3. `.github/workflows/ci.yml` 会在 push / PR 时自动构建四类产物：
-   - Linux amd64：`.deb` + 独立可执行文件 `.tar.gz`
-   - Linux arm64：`.deb` + 独立可执行文件 `.tar.gz`
+   - Linux amd64：`sparkapp-core` + `sparkapp-tui` 两个 `.deb`，以及独立可执行文件 `.tar.gz`
+   - Linux arm64：`sparkapp-core` + `sparkapp-tui` 两个 `.deb`，以及独立可执行文件 `.tar.gz`
    - Windows amd64 / arm64：`.zip`（静态链接 OpenSSL，单 exe）
    - Debian 源码包：`.dsc` + `.orig.tar.gz` + `.debian.tar.xz` + `.changes` + `.buildinfo`
 
@@ -315,8 +315,9 @@ Flarum 2.x 的置顶 / 锁定 / 隐藏 / 重命名 / 标签通过
    ```bash
    sha256sum -c SHA256SUMS
 
-   # Debian / Ubuntu
-   sudo apt install ./spark-tui_0.2.1-1_amd64.deb
+   # Debian / Ubuntu（core + tui，TUI 不会拉入 GTK）
+   sudo apt install ./sparkapp-core_0.2.1-1_amd64.deb \
+                    ./sparkapp-tui_0.2.1-1_amd64.deb
 
    # 其它 Linux：解压后直接运行
    tar -xzf spark-tui_0.2.1_linux-amd64.tar.gz
@@ -329,6 +330,12 @@ Flarum 2.x 的置顶 / 锁定 / 隐藏 / 重命名 / 标签通过
    `spark-tui_0.2.1_all.tar.gz`，解压后是 `spark-tui-0.2.1/` 文件夹，
    包含 `.deb`、Windows zip、Linux tar、源码包、`.changes`、`.buildinfo`
    和内部 `SHA256SUMS`，可以直接作为手动导入 deb 源的目录。
+
+   二进制包拆分为：
+
+   - `sparkapp-core`：共享 `libsparkapp-core.so`、配置、文档和 API 逻辑；
+   - `sparkapp-tui`：`spark-tui` 可执行文件，依赖 `sparkapp-core`，不依赖 GTK；
+   - `sparkapp-gui`：GTK 前端接入后新增，依赖 `sparkapp-core` + GTK/libadwaita。
 
    Debian 源码包（`.dsc` / `.orig.tar.*` / `.debian.tar.*` / `.changes` /
    `.buildinfo` 都在同一个 artifact 里，文件名带 `0.2.1-1` 版本号）：

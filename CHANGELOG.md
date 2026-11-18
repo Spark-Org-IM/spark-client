@@ -9,6 +9,7 @@
 - GitHub Actions 多平台矩阵：Linux amd64 / arm64 生成 `.deb` 和独立可执行文件，
   Windows amd64 / arm64 生成单 exe 的 `.zip`；
 - Debian 源码包：`.dsc` + `.orig.tar.gz` + `.debian.tar.xz` + `.changes` + `.buildinfo`；
+- 二进制包拆分为 `sparkapp-core` / `sparkapp-tui`，TUI 不依赖 GTK；
 - 所有发布文件汇总为 `spark-tui_<version>_all.tar.gz` 总包；
 - push / PR 构建并上传 artifact，`v*` tag 自动汇总发布 Release。
 

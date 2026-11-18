@@ -32,11 +32,12 @@ sed -i "1s/^spark-tui ([^)]*)/spark-tui (${version})/" "$stage/debian/changelog"
 
 (
   cd "$stage"
-  dpkg-source -b .
+  # -S: source package only; -sa: include the orig tarball in .changes;
+  # -nc: staging tree is already clean, so no debhelper clean hooks.
+  dpkg-buildpackage -S -us -uc -sa -d -nc
 )
 
 rm -rf "$out"
 mkdir -p "$out"
-cp "$tmp"/spark-tui_*.dsc "$tmp"/spark-tui_*.orig.tar.* \
-  "$tmp"/spark-tui_*.debian.tar.* "$out"/
+mv "$tmp"/spark-tui_* "$out"/
 ls -lh "$out"

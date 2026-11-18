@@ -215,7 +215,7 @@ jobs:
       - name: Checksums
         run: |
           cd build/source
-          sha256sum ./*.dsc ./*.orig.tar.* ./*.debian.tar.* > SHA256SUMS-source
+          sha256sum ./*.dsc ./*.orig.tar.* ./*.debian.tar.* ./*.changes ./*.buildinfo > SHA256SUMS-source
 
       - name: Upload source package
         uses: actions/upload-artifact@v7

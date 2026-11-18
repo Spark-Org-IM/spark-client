@@ -298,7 +298,7 @@ Flarum 2.x 的置顶 / 锁定 / 隐藏 / 重命名 / 标签通过
    - Linux amd64：`.deb` + 独立可执行文件 `.tar.gz`
    - Linux arm64：`.deb` + 独立可执行文件 `.tar.gz`
    - Windows amd64 / arm64：`.zip`（静态链接 OpenSSL，单 exe）
-   - Debian 源码包：`.dsc` + `.orig.tar.gz` + `.debian.tar.xz`
+   - Debian 源码包：`.dsc` + `.orig.tar.gz` + `.debian.tar.xz` + `.changes` + `.buildinfo`
 
    每个任务都会运行单元测试 / 打包检查，并把产物上传为 Actions artifact
    （保留 90 天）。
@@ -323,12 +323,16 @@ Flarum 2.x 的置顶 / 锁定 / 隐藏 / 重命名 / 标签通过
    Windows 解压 `spark-tui_0.2.0_windows-amd64.zip` 或
    `spark-tui_0.2.0_windows-arm64.zip` 后运行 `spark-tui.exe`。
 
-   Debian 源码包：
+   Debian 源码包（`.dsc` / `.orig.tar.*` / `.debian.tar.*` / `.changes` /
+   `.buildinfo` 都在同一个 artifact 里，文件名带 `0.2.0-1` 版本号）：
    ```bash
    dpkg-source -x spark-tui_0.2.0-1.dsc
    cd spark-tui-0.2.0
    dpkg-buildpackage -us -uc
    ```
+
+   CI 生成源码包时使用 `dpkg-buildpackage -S -us -uc -sa`；`-sa` 会把
+   `orig.tar.*` 一并写进 `.changes`。
 
 0.x 阶段不使用 beta 后缀：重要测试节点直接打 `v0.2.0`，日常测试不推
 tag，直接使用 Actions artifact 即可。

@@ -205,7 +205,7 @@ void Application::ShowSettings() {
       "GTK 前端会跟随 GNOME 的深色模式、强调色和高对比度设置。");
 
   GtkWidget* row = adw_action_row_new();
-  adw_action_row_set_title(ADW_ACTION_ROW(row), "主题");
+  adw_preferences_row_set_title(ADW_PREFERENCES_ROW(row), "主题");
   adw_action_row_set_subtitle(ADW_ACTION_ROW(row),
                               "跟随系统（libadwaita 默认）");
   adw_action_row_add_suffix(ADW_ACTION_ROW(row),

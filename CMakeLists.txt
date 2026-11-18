@@ -1,10 +1,18 @@
 cmake_minimum_required(VERSION 3.20)
 
-# CI stamps these from the release tag. The project version must stay numeric;
-# the package version may use Debian's tilde suffix (`0.2.0~beta.1`).
-set(SPARK_TUI_PROJECT_VERSION "0.2.0" CACHE STRING "spark-tui version")
-set(SPARK_TUI_PACKAGE_VERSION "${SPARK_TUI_PROJECT_VERSION}-1"
-    CACHE STRING "spark-tui package version")
+# VERSION is the single source of truth for the release version. It contains
+# the upstream version plus the Debian revision, for example `0.2.1-1`.
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" SPARK_TUI_VERSION_LINE
+     LIMIT_COUNT 1)
+string(STRIP "${SPARK_TUI_VERSION_LINE}" SPARK_TUI_VERSION_LINE)
+if(NOT SPARK_TUI_VERSION_LINE MATCHES "^([0-9]+\.[0-9]+\.[0-9]+)-([0-9]+)$")
+  message(FATAL_ERROR
+    "VERSION must look like <upstream>-<debian-revision>, e.g. 0.2.1-1")
+endif()
+set(SPARK_TUI_PROJECT_VERSION "${CMAKE_MATCH_1}"
+    CACHE STRING "spark-tui version" FORCE)
+set(SPARK_TUI_PACKAGE_VERSION "${SPARK_TUI_VERSION_LINE}"
+    CACHE STRING "spark-tui package version" FORCE)
 project(spark-tui VERSION ${SPARK_TUI_PROJECT_VERSION} LANGUAGES CXX)
 
 # ---------------------------------------------------------------------------

@@ -4,7 +4,7 @@ set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root"
 
-version="${1:-$(dpkg-parsechangelog -SVersion)}"
+version="${1:-$(head -n 1 "$root/VERSION" | tr -d '[:space:]')}"
 upstream="${version%-*}"
 out="${2:-$root/build/source}"
 ref="${3:-HEAD}"

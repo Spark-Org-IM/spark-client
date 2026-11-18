@@ -289,10 +289,12 @@ Flarum 2.x 的置顶 / 锁定 / 隐藏 / 重命名 / 标签通过
 推荐把 **GitHub Releases 当作分发 CDN**，CI 只负责构建、测试和上传产物：
 
 1. 在 GitHub 建一个公开仓库（例如 `Spark-Org-IM/spark-client`）；
-2. 把当前自建 Git 作为开发源，增加 GitHub remote 并推送：
+2. 当前本地 remote 约定：
+   - `origin` = GitHub SSH
+   - `gitea` = 自建 Git
+
    ```bash
-   git remote add github git@github.com:Spark-Org-IM/spark-client.git
-   git push github dev-261115
+   git push origin <branch>
    ```
 3. `.github/workflows/ci.yml` 会在 push / PR 时自动构建四类产物：
    - Linux amd64：`.deb` + 独立可执行文件 `.tar.gz`
@@ -304,8 +306,8 @@ Flarum 2.x 的置顶 / 锁定 / 隐藏 / 重命名 / 标签通过
    （保留 90 天）。
 4. 发布版本只需要推 tag：
    ```bash
-   git tag v0.2.0
-   git push github v0.2.0
+   git tag v0.2.1
+   git push origin v0.2.1
    ```
    同一个 workflow 会创建 GitHub Release，并附上所有平台包和统一的
    `SHA256SUMS`。
@@ -314,32 +316,32 @@ Flarum 2.x 的置顶 / 锁定 / 隐藏 / 重命名 / 标签通过
    sha256sum -c SHA256SUMS
 
    # Debian / Ubuntu
-   sudo apt install ./spark-tui_0.2.0-1_amd64.deb
+   sudo apt install ./spark-tui_0.2.1-1_amd64.deb
 
    # 其它 Linux：解压后直接运行
-   tar -xzf spark-tui_0.2.0_linux-amd64.tar.gz
-   ./spark-tui-0.2.0-linux-amd64/spark-tui
+   tar -xzf spark-tui_0.2.1_linux-amd64.tar.gz
+   ./spark-tui-0.2.1-linux-amd64/spark-tui
    ```
-   Windows 解压 `spark-tui_0.2.0_windows-amd64.zip` 或
-   `spark-tui_0.2.0_windows-arm64.zip` 后运行 `spark-tui.exe`。
+   Windows 解压 `spark-tui_0.2.1_windows-amd64.zip` 或
+   `spark-tui_0.2.1_windows-arm64.zip` 后运行 `spark-tui.exe`。
 
    所有发布文件还会打成一个总包
-   `spark-tui_0.2.0_all.tar.gz`，解压后是 `spark-tui-0.2.0/` 文件夹，
+   `spark-tui_0.2.1_all.tar.gz`，解压后是 `spark-tui-0.2.1/` 文件夹，
    包含 `.deb`、Windows zip、Linux tar、源码包、`.changes`、`.buildinfo`
    和内部 `SHA256SUMS`，可以直接作为手动导入 deb 源的目录。
 
    Debian 源码包（`.dsc` / `.orig.tar.*` / `.debian.tar.*` / `.changes` /
-   `.buildinfo` 都在同一个 artifact 里，文件名带 `0.2.0-1` 版本号）：
+   `.buildinfo` 都在同一个 artifact 里，文件名带 `0.2.1-1` 版本号）：
    ```bash
-   dpkg-source -x spark-tui_0.2.0-1.dsc
-   cd spark-tui-0.2.0
+   dpkg-source -x spark-tui_0.2.1-1.dsc
+   cd spark-tui-0.2.1
    dpkg-buildpackage -us -uc
    ```
 
    CI 生成源码包时使用 `dpkg-buildpackage -S -us -uc -sa`；`-sa` 会把
    `orig.tar.*` 一并写进 `.changes`。
 
-0.x 阶段不使用 beta 后缀：重要测试节点直接打 `v0.2.0`，日常测试不推
+0.x 阶段不使用 beta 后缀：重要测试节点直接打 `v0.2.1`，日常测试不推
 tag，直接使用 Actions artifact 即可。
 
 GitHub Actions 对公开仓库的标准 Linux runner **不计分钟数**；私有仓库
@@ -363,6 +365,33 @@ Gitea 忽略 `.github/workflows`，避免在没有 runner 时出现
 > 如果以后需要 `apt upgrade` 自动更新，可以在 GitHub Pages 上放一个
 > 用 `reprepro` / `aptly` 生成的静态 APT 仓库；当前阶段用 Releases +
 > 手动安装 `.deb` 更简单，也不需要维护服务器。
+
+## 版本号
+
+根目录的 `VERSION` 是唯一版本源，格式为：
+
+```text
+上游版本-Debian修订号
+0.2.1-1
+```
+
+CMake 从这里生成：
+
+- `SPARK_TUI_PROJECT_VERSION`：`0.2.1`
+- `SPARK_TUI_PACKAGE_VERSION`：`0.2.1-1`
+- 程序里的 `SPARK_TUI_VERSION`、`spark-tui --version`
+- `.deb` 文件名、Linux tar / Windows zip 文件名
+- Debian 源码包版本
+
+修改版本时只改 `VERSION`，然后同步派生文件：
+
+```bash
+packaging/sync-version.sh
+```
+
+它会更新 `debian/changelog` 和 `vcpkg.json`。CI 会运行
+`packaging/sync-version.sh --check`，并校验 tag 必须等于
+`v${VERSION%-*}`，例如 `VERSION=0.2.1-1` 只能打 `v0.2.1`。
 
 ## 打包 .deb
 
@@ -415,6 +444,9 @@ sudo dpkg -i build/spark-tui_*.deb
 `ui/render_detail.*`）不依赖 FTXUI，是可以被其它前端复用的业务层。当前的
 TUI 只是其中一种前端；以后开发 GTK GUI 时直接链接 `spark_core`，不要把
 API / 配置 / 服务源逻辑复制到界面层。
+
+GTK / GNOME 前端设计、GUI/TUI 启动检测、libadwaita 主题和打包方式见
+[`dev-docs/GTK.md`](dev-docs/GTK.md)。
 
 ## API 文档
 

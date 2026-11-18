@@ -48,18 +48,13 @@ jobs:
 
       - name: Configure
         run: |
-          args=(-S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release)
-          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
-            raw="${GITHUB_REF_NAME#v}"
-            version="${raw%%-*}"
-            args+=(
-              "-DSPARK_TUI_PROJECT_VERSION=${version}"
-              "-DSPARK_TUI_PACKAGE_VERSION=${version}-1"
-            )
-          else
-            args+=("-DSPARK_TUI_PACKAGE_VERSION=$(dpkg-parsechangelog -SVersion)")
+          version=$(head -n 1 VERSION | tr -d '[:space:]')
+          project="${version%-*}"
+          if [ "${GITHUB_REF_TYPE}" = "tag" ] && [ "${GITHUB_REF_NAME}" != "v${project}" ]; then
+            echo "tag ${GITHUB_REF_NAME} does not match VERSION v${project}" >&2
+            exit 1
           fi
-          cmake "${args[@]}"
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 
       - name: Build
         run: cmake --build build --parallel 4
@@ -130,6 +125,11 @@ jobs:
           if (-not (Test-Path "$vcpkg/scripts/buildsystems/vcpkg.cmake")) {
             throw "vcpkg toolchain not found under $vcpkg"
           }
+          $version = (Get-Content VERSION -TotalCount 1).Trim()
+          $project = $version.Split('-')[0]
+          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -ne "v$project") {
+            throw "tag $env:GITHUB_REF_NAME does not match VERSION v$project"
+          }
           $args = @(
             '-S', '.', '-B', 'build',
             '-A', '${{ matrix.generator_arch }}',
@@ -138,16 +138,6 @@ jobs:
             '-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded',
             '-DCMAKE_BUILD_TYPE=Release'
           )
-          if ($env:GITHUB_REF_TYPE -eq 'tag') {
-            $raw = $env:GITHUB_REF_NAME.TrimStart('v')
-            $version = ($raw -split '-')[0]
-            $package = $version
-            if ($raw -ne $version) {
-              $package = "$version~$($raw.Substring($version.Length + 1))"
-            }
-            $args += "-DSPARK_TUI_PROJECT_VERSION=$version"
-            $args += "-DSPARK_TUI_PACKAGE_VERSION=$package"
-          }
           cmake @args
 
       - name: Build
@@ -196,18 +186,13 @@ jobs:
 
       - name: Build Debian source package
         run: |
-          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
-            raw="${GITHUB_REF_NAME#v}"
-            if [[ "${raw}" == *-* ]]; then
-              upstream="${raw%%-*}"
-              suffix="${raw#*-}"
-              version="${upstream}~${suffix}-1"
-            else
-              version="${raw}-1"
-            fi
-          else
-            version=$(dpkg-parsechangelog -SVersion)
+          version=$(head -n 1 VERSION | tr -d '[:space:]')
+          project="${version%-*}"
+          if [ "${GITHUB_REF_TYPE}" = "tag" ] && [ "${GITHUB_REF_NAME}" != "v${project}" ]; then
+            echo "tag ${GITHUB_REF_NAME} does not match VERSION v${project}" >&2
+            exit 1
           fi
+          packaging/sync-version.sh --check
           packaging/build-source.sh "${version}"
 
       - name: Checksums

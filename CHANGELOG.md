@@ -4,6 +4,8 @@
 
 ### 构建
 
+- 版本号统一由根目录 `VERSION` 控制，`debian/changelog` 和 `vcpkg.json` 由
+  `packaging/sync-version.sh` 同步；
 - GitHub Actions 多平台矩阵：Linux amd64 / arm64 生成 `.deb` 和独立可执行文件，
   Windows amd64 / arm64 生成单 exe 的 `.zip`；
 - Debian 源码包：`.dsc` + `.orig.tar.gz` + `.debian.tar.xz` + `.changes` + `.buildinfo`；

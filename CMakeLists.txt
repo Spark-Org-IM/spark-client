@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.20)
 # CI stamps these from the release tag. The project version must stay numeric;
 # the package version may use Debian's tilde suffix (`0.2.0~beta.1`).
 set(SPARK_TUI_PROJECT_VERSION "0.2.0" CACHE STRING "spark-tui version")
-set(SPARK_TUI_PACKAGE_VERSION "${SPARK_TUI_PROJECT_VERSION}"
+set(SPARK_TUI_PACKAGE_VERSION "${SPARK_TUI_PROJECT_VERSION}-1"
     CACHE STRING "spark-tui package version")
 project(spark-tui VERSION ${SPARK_TUI_PROJECT_VERSION} LANGUAGES CXX)
 

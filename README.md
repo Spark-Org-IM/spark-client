@@ -314,7 +314,7 @@ Flarum 2.x 的置顶 / 锁定 / 隐藏 / 重命名 / 标签通过
    sha256sum -c SHA256SUMS
 
    # Debian / Ubuntu
-   sudo apt install ./spark-tui_0.2.0_amd64.deb
+   sudo apt install ./spark-tui_0.2.0-1_amd64.deb
 
    # 其它 Linux：解压后直接运行
    tar -xzf spark-tui_0.2.0_linux-amd64.tar.gz
@@ -322,6 +322,11 @@ Flarum 2.x 的置顶 / 锁定 / 隐藏 / 重命名 / 标签通过
    ```
    Windows 解压 `spark-tui_0.2.0_windows-amd64.zip` 或
    `spark-tui_0.2.0_windows-arm64.zip` 后运行 `spark-tui.exe`。
+
+   所有发布文件还会打成一个总包
+   `spark-tui_0.2.0_all.tar.gz`，解压后是 `spark-tui-0.2.0/` 文件夹，
+   包含 `.deb`、Windows zip、Linux tar、源码包、`.changes`、`.buildinfo`
+   和内部 `SHA256SUMS`，可以直接作为手动导入 deb 源的目录。
 
    Debian 源码包（`.dsc` / `.orig.tar.*` / `.debian.tar.*` / `.changes` /
    `.buildinfo` 都在同一个 artifact 里，文件名带 `0.2.0-1` 版本号）：

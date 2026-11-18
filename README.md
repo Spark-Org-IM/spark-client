@@ -294,12 +294,14 @@ Flarum 2.x 的置顶 / 锁定 / 隐藏 / 重命名 / 标签通过
    git remote add github git@github.com:Spark-Org-IM/spark-client.git
    git push github dev-261115
    ```
-3. `.github/workflows/ci.yml` 会在 push / PR 时自动构建三个目标：
+3. `.github/workflows/ci.yml` 会在 push / PR 时自动构建四类产物：
    - Linux amd64：`.deb` + 独立可执行文件 `.tar.gz`
    - Linux arm64：`.deb` + 独立可执行文件 `.tar.gz`
    - Windows amd64 / arm64：`.zip`（静态链接 OpenSSL，单 exe）
+   - Debian 源码包：`.dsc` + `.orig.tar.gz` + `.debian.tar.xz`
 
-   每个任务都会运行单元测试，并把包上传为 Actions artifact（保留 90 天）。
+   每个任务都会运行单元测试 / 打包检查，并把产物上传为 Actions artifact
+   （保留 90 天）。
 4. 发布版本只需要推 tag：
    ```bash
    git tag v0.2.0
@@ -320,6 +322,13 @@ Flarum 2.x 的置顶 / 锁定 / 隐藏 / 重命名 / 标签通过
    ```
    Windows 解压 `spark-tui_0.2.0_windows-amd64.zip` 或
    `spark-tui_0.2.0_windows-arm64.zip` 后运行 `spark-tui.exe`。
+
+   Debian 源码包：
+   ```bash
+   dpkg-source -x spark-tui_0.2.0-1.dsc
+   cd spark-tui-0.2.0
+   dpkg-buildpackage -us -uc
+   ```
 
 0.x 阶段不使用 beta 后缀：重要测试节点直接打 `v0.2.0`，日常测试不推
 tag，直接使用 Actions artifact 即可。

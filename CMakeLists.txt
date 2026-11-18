@@ -128,6 +128,7 @@ set(SPARK_CORE_SOURCES
   src/util.cpp
   src/i18n.cpp
   src/config.cpp
+  src/options.cpp
   src/platform/session.cpp
   src/service_source.cpp
   src/api/client.cpp
@@ -161,7 +162,6 @@ endif()
 # ---------------------------------------------------------------------------
 add_executable(spark-tui
   src/main.cpp
-  src/options.cpp
   src/ui/worker.cpp
   src/ui/app.cpp
 )

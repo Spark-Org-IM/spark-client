@@ -171,10 +171,12 @@ void Application::BuildWindow() {
 
 void Application::InstallActions() {
   static const GActionEntry entries[] = {
-      {"settings", &Application::OnSettings, nullptr, nullptr, nullptr},
-      {"about", &Application::OnAbout, nullptr, nullptr, nullptr},
-      {"quit", &Application::OnQuit, nullptr, nullptr, nullptr},
-      {"refresh", &Application::OnRefresh, nullptr, nullptr, nullptr},
+      {"settings", &Application::OnSettings, nullptr, nullptr, nullptr,
+       {0, 0, 0}},
+      {"about", &Application::OnAbout, nullptr, nullptr, nullptr, {0, 0, 0}},
+      {"quit", &Application::OnQuit, nullptr, nullptr, nullptr, {0, 0, 0}},
+      {"refresh", &Application::OnRefresh, nullptr, nullptr, nullptr,
+       {0, 0, 0}},
   };
   g_action_map_add_action_entries(G_ACTION_MAP(app_), entries,
                                   G_N_ELEMENTS(entries), this);

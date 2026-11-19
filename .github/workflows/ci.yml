@@ -38,7 +38,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            build-essential cmake ninja-build libssl-dev dpkg-dev
+            build-essential cmake ninja-build libssl-dev dpkg-dev patchelf
 
       - name: Cache FTXUI source (fallback build)
         uses: actions/cache@v6
@@ -71,9 +71,28 @@ jobs:
           mkdir -p "../$name"
           cp spark-tui spark-client "../$name/"
           cp -a libsparkapp-core.so* "../$name/"
+          # Build-tree rpaths point at the CI workspace; the tarball must resolve
+          # libsparkapp-core.so next to the binaries instead.
+          patchelf --set-rpath '$ORIGIN' "../$name/spark-tui" "../$name/spark-client"
           cp ../README.md ../LICENSE ../docs/config.example.toml "../$name/"
           tar -C .. -czf "spark-tui_${project_version}_linux-${{ matrix.arch }}.tar.gz" "$name"
           sha256sum ./*.deb ./*.tar.gz > "SHA256SUMS-${{ matrix.arch }}"
+
+      - name: Verify Linux tarball
+        if: matrix.arch == 'amd64'
+        run: |
+          cd build
+          project_version=$(grep '^SPARK_TUI_PROJECT_VERSION:STRING=' CMakeCache.txt | cut -d= -f2)
+          rm -rf /tmp/tarcheck
+          mkdir -p /tmp/tarcheck
+          tar -xzf "spark-tui_${project_version}_linux-amd64.tar.gz" -C /tmp/tarcheck
+          cd /tmp
+          env -u LD_LIBRARY_PATH "/tmp/tarcheck/spark-tui-${project_version}-linux-amd64/spark-tui" --version
+          env -u LD_LIBRARY_PATH "/tmp/tarcheck/spark-tui-${project_version}-linux-amd64/spark-client" --version
+          if readelf -d "/tmp/tarcheck/spark-tui-${project_version}-linux-amd64/spark-tui" | grep -v '\$ORIGIN' | grep -q 'RPATH\|RUNPATH'; then
+            echo "tarball binary still contains a non-\$ORIGIN rpath" >&2
+            exit 1
+          fi
 
       - name: Upload Linux packages
         uses: actions/upload-artifact@v7

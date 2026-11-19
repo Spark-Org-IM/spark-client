@@ -15,6 +15,12 @@ set(SPARK_TUI_PACKAGE_VERSION "${SPARK_TUI_VERSION_LINE}"
     CACHE STRING "spark-tui package version" FORCE)
 project(spark-tui VERSION ${SPARK_TUI_PROJECT_VERSION} LANGUAGES CXX)
 
+# Build-tree binaries are copied into the standalone Linux tarball, so their
+# rpath must not contain an absolute build directory. With this option CMake
+# rewrites it to $ORIGIN, which is valid both in the build tree and in the
+# extracted tarball.
+set(CMAKE_BUILD_RPATH_USE_ORIGIN ON)
+
 # ---------------------------------------------------------------------------
 # Language / build defaults
 # ---------------------------------------------------------------------------
@@ -168,7 +174,8 @@ add_executable(spark-tui
 target_link_libraries(spark-tui PRIVATE
   spark_core ftxui::screen ftxui::dom ftxui::component)
 # Standalone Linux tarballs ship libsparkapp-core.so next to the binaries.
-set_target_properties(spark-tui PROPERTIES INSTALL_RPATH "$ORIGIN")
+set_target_properties(spark-tui PROPERTIES
+  BUILD_RPATH "$ORIGIN" INSTALL_RPATH "$ORIGIN")
 target_compile_definitions(spark-tui PRIVATE
   SPARK_TUI_VERSION="${PROJECT_VERSION}")
 target_compile_options(spark-tui PRIVATE ${SPARK_TUI_WARNING_FLAGS})
@@ -179,7 +186,8 @@ target_compile_options(spark-tui PRIVATE ${SPARK_TUI_WARNING_FLAGS})
 if(UNIX AND NOT APPLE)
   add_executable(spark-client src/entry/main.cpp)
   target_link_libraries(spark-client PRIVATE spark_core)
-  set_target_properties(spark-client PROPERTIES INSTALL_RPATH "$ORIGIN")
+  set_target_properties(spark-client PROPERTIES
+    BUILD_RPATH "$ORIGIN" INSTALL_RPATH "$ORIGIN")
   target_compile_definitions(spark-client PRIVATE
     SPARK_TUI_VERSION="${PROJECT_VERSION}")
   target_compile_options(spark-client PRIVATE ${SPARK_TUI_WARNING_FLAGS})

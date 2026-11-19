@@ -13,9 +13,10 @@ Package: sparkapp-core
 Architecture: any
 Section: libs
 Depends: ${shlibs:Depends}, ${misc:Depends}
-Description: shared core library for Spark ORG clients
+Description: shared core library and launcher for Spark ORG clients
  Common configuration, Spark ORG API, Flarum API and service-source logic
- used by the Spark ORG terminal and GTK frontends.
+ used by the Spark ORG terminal and GTK frontends, plus the spark-client
+ launcher which starts the frontend that matches the current session.
 
 Package: sparkapp-tui
 Architecture: any

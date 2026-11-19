@@ -65,7 +65,7 @@ int main(int argc, char** argv) {
   if (opts.insecure) cfg.insecure = true;
 
   if (spark::ParseUiMode(opts.ui) == spark::UiMode::Gtk) {
-    std::cerr << "GTK 前端请运行 spark-gui\n";
+    std::cerr << "GTK 前端请运行 spark-gui 或 spark-client\n";
     return 2;
   }
 

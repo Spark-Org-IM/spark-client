@@ -16,6 +16,7 @@ bool HasGraphicalSession();
 
 // Explicit choice > SPARK_UI > .desktop launch > SSH > tty > graphical session.
 // Returns UiMode::Auto when neither a terminal nor a graphical session exists.
+// Used by the `spark-client` dispatcher; the frontends themselves never guess.
 UiMode DetectUiMode(UiMode requested);
 
 }  // namespace spark

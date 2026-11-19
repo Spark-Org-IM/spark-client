@@ -9,7 +9,6 @@
 #include "config.h"
 #include "gtk/application.h"
 #include "options.h"
-#include "platform/session.h"
 #include "util.h"
 
 namespace {
@@ -67,21 +66,6 @@ int main(int argc, char** argv) {
   if (opts.showVersion) {
     std::cout << "spark-gui " SPARK_TUI_VERSION << "\n";
     return 0;
-  }
-
-  const spark::UiMode requested = spark::ParseUiMode(opts.ui);
-  if (requested == spark::UiMode::Tui) {
-    std::cerr << "spark-gui 是 GTK 前端；终端界面请运行 spark-tui\n";
-    return 2;
-  }
-  const spark::UiMode mode =
-      spark::DetectUiMode(requested == spark::UiMode::Auto
-                              ? spark::UiMode::Gtk
-                              : requested);
-  if (mode != spark::UiMode::Gtk || !spark::HasGraphicalSession()) {
-    std::cerr << "没有可用的图形会话；请在桌面环境运行 spark-gui，"
-                 "或在终端运行 spark-tui\n";
-    return 1;
   }
 
   const std::string config_path =

@@ -64,7 +64,8 @@ v6.1.9。加 `-DSPARK_TUI_USE_SYSTEM_FTXUI=ON` 可以强制使用系统包，避
 运行：
 
 ```bash
-./build/spark-tui
+./build/spark-tui       # 只跑 TUI
+./build/spark-client    # 按会话选择 TUI / GUI（Linux）
 ```
 
 ## 本机开发（Service-Newsite，端口 8096）
@@ -205,6 +206,26 @@ display_name = 'Jianyin Li'
 | `-l`, `--lang` | `SPARK_TUI_LANG` | `zh-cn` / `en-us` |
 | `--config` | `SPARK_TUI_CONFIG` | 配置文件路径 |
 | `-k`, `--insecure` | `SPARK_TUI_INSECURE` | 跳过 TLS 校验 |
+| `--ui` | `SPARK_UI` | 前端：`auto` / `tui` / `gtk`，由 `spark-client` 处理 |
+
+### 启动入口
+
+| 命令 | 所属包 | 行为 |
+| --- | --- | --- |
+| `spark-client` | `sparkapp-core` | 检测会话，`exec` 到 `spark-gui` 或 `spark-tui` |
+| `spark-tui` | `sparkapp-tui` | 只运行终端界面，不做任何 GUI 判断 |
+| `spark-gui` | `sparkapp-gui`（后续） | 只运行 GTK 界面，不做任何终端判断 |
+
+`spark-client` 的判定顺序与 `--ui` / `SPARK_UI` 一致：
+
+1. `--ui tui|gtk` 或 `SPARK_UI` 显式指定；
+2. 从 `.desktop` / GIO 启动 → GUI；
+3. SSH 会话 → TUI；
+4. stdin/stdout 是 TTY → TUI；
+5. 有图形会话 → GUI；
+6. 都没有 → 报错并提示安装哪个包。
+
+前端可执行文件优先在 `spark-client` 同目录查找，其次 `PATH`。
 
 ## 快捷键
 
@@ -297,8 +318,8 @@ Flarum 2.x 的置顶 / 锁定 / 隐藏 / 重命名 / 标签通过
    git push origin <branch>
    ```
 3. `.github/workflows/ci.yml` 会在 push / PR 时自动构建四类产物：
-   - Linux amd64：`sparkapp-core` + `sparkapp-tui` 两个 `.deb`，以及独立可执行文件 `.tar.gz`
-   - Linux arm64：`sparkapp-core` + `sparkapp-tui` 两个 `.deb`，以及独立可执行文件 `.tar.gz`
+   - Linux amd64：`sparkapp-core` + `sparkapp-tui` 两个 `.deb`，以及自包含运行包 `.tar.gz`
+   - Linux arm64：`sparkapp-core` + `sparkapp-tui` 两个 `.deb`，以及自包含运行包 `.tar.gz`
    - Windows amd64 / arm64：`.zip`（静态链接 OpenSSL，单 exe）
    - Debian 源码包：`.dsc` + `.orig.tar.gz` + `.debian.tar.xz` + `.changes` + `.buildinfo`
 
@@ -319,9 +340,13 @@ Flarum 2.x 的置顶 / 锁定 / 隐藏 / 重命名 / 标签通过
    sudo apt install ./sparkapp-core_0.2.1-1_amd64.deb \
                     ./sparkapp-tui_0.2.1-1_amd64.deb
 
-   # 其它 Linux：解压后直接运行
+   # 统一入口：按会话自动启动 spark-gui 或 spark-tui
+   spark-client
+
+   # 其它 Linux：解压后直接运行（包内已带 libsparkapp-core.so）
    tar -xzf spark-tui_0.2.1_linux-amd64.tar.gz
    ./spark-tui-0.2.1-linux-amd64/spark-tui
+   ./spark-tui-0.2.1-linux-amd64/spark-client   # 统一入口
    ```
    Windows 解压 `spark-tui_0.2.1_windows-amd64.zip` 或
    `spark-tui_0.2.1_windows-arm64.zip` 后运行 `spark-tui.exe`。
@@ -333,9 +358,14 @@ Flarum 2.x 的置顶 / 锁定 / 隐藏 / 重命名 / 标签通过
 
    二进制包拆分为：
 
-   - `sparkapp-core`：共享 `libsparkapp-core.so`、配置、文档和 API 逻辑；
+   - `sparkapp-core`：共享 `libsparkapp-core.so`、配置、API 逻辑，以及统一
+     入口 `spark-client`；
    - `sparkapp-tui`：`spark-tui` 可执行文件，依赖 `sparkapp-core`，不依赖 GTK；
    - `sparkapp-gui`：GTK 前端接入后新增，依赖 `sparkapp-core` + GTK/libadwaita。
+
+   `spark-client` 只负责选择前端，不做界面：图形会话启动 `spark-gui`，
+   终端 / SSH 启动 `spark-tui`；如果只装了 `sparkapp-core`，它会直接提示
+   缺少哪个前端（图形会话下用 zenity/kdialog 弹窗），不会静默失败。
 
    Debian 源码包（`.dsc` / `.orig.tar.*` / `.debian.tar.*` / `.changes` /
    `.buildinfo` 都在同一个 artifact 里，文件名带 `0.2.1-1` 版本号）：

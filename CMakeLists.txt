@@ -167,9 +167,23 @@ add_executable(spark-tui
 )
 target_link_libraries(spark-tui PRIVATE
   spark_core ftxui::screen ftxui::dom ftxui::component)
+# Standalone Linux tarballs ship libsparkapp-core.so next to the binaries.
+set_target_properties(spark-tui PROPERTIES INSTALL_RPATH "$ORIGIN")
 target_compile_definitions(spark-tui PRIVATE
   SPARK_TUI_VERSION="${PROJECT_VERSION}")
 target_compile_options(spark-tui PRIVATE ${SPARK_TUI_WARNING_FLAGS})
+
+# ---------------------------------------------------------------------------
+# Dispatcher (ships with sparkapp-core, picks spark-gui or spark-tui)
+# ---------------------------------------------------------------------------
+if(UNIX AND NOT APPLE)
+  add_executable(spark-client src/entry/main.cpp)
+  target_link_libraries(spark-client PRIVATE spark_core)
+  set_target_properties(spark-client PROPERTIES INSTALL_RPATH "$ORIGIN")
+  target_compile_definitions(spark-client PRIVATE
+    SPARK_TUI_VERSION="${PROJECT_VERSION}")
+  target_compile_options(spark-client PRIVATE ${SPARK_TUI_WARNING_FLAGS})
+endif()
 
 # ---------------------------------------------------------------------------
 # GTK / libadwaita frontend (code-only framework; packaging comes later)
@@ -203,6 +217,10 @@ install(TARGETS spark_core
         LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}" COMPONENT core
         ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}" COMPONENT core
         RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}" COMPONENT core)
+if(UNIX AND NOT APPLE)
+  install(TARGETS spark-client
+          RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}" COMPONENT core)
+endif()
 install(TARGETS spark-tui
         RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}" COMPONENT tui)
 install(FILES packaging/spark-tui.desktop

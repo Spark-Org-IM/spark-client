@@ -69,7 +69,8 @@ jobs:
           project_version=$(grep '^SPARK_TUI_PROJECT_VERSION:STRING=' CMakeCache.txt | cut -d= -f2)
           name="spark-tui-${project_version}-linux-${{ matrix.arch }}"
           mkdir -p "../$name"
-          cp spark-tui "../$name/"
+          cp spark-tui spark-client "../$name/"
+          cp -a libsparkapp-core.so* "../$name/"
           cp ../README.md ../LICENSE ../docs/config.example.toml "../$name/"
           tar -C .. -czf "spark-tui_${project_version}_linux-${{ matrix.arch }}.tar.gz" "$name"
           sha256sum ./*.deb ./*.tar.gz > "SHA256SUMS-${{ matrix.arch }}"

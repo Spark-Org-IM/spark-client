@@ -1,19 +1,21 @@
 # GTK 前端开发指南
 
 本文说明如何在 `spark-tui` 的 `spark_core` 之上增加一个 GTK4 / libadwaita
-前端，并让 TUI 与 GUI 能正确判断自己是从终端、桌面环境还是应用启动器启动的。
+前端，并由统一入口 `spark-client` 决定当前会话该启动 TUI 还是 GUI。
 界面风格以 **GNOME / libadwaita** 为准，不另做一套自定义主题。
 
 当前仓库的边界：
 
 - `spark_core`：配置、服务源、Spark API、Flarum API、渲染无关的模型，**不依赖 FTXUI**；
-- `spark-tui`：FTXUI 终端前端；
-- 未来的 `spark-gui`：GTK4 + libadwaita 前端，只链接 `spark_core`，不链接 FTXUI。
+- `spark-client`：随 `sparkapp-core` 安装的入口，检测会话后 `exec` 前端；
+- `spark-tui`：FTXUI 终端前端，永远是 TUI；
+- 未来的 `spark-gui`：GTK4 + libadwaita 前端，永远是 GUI。
 
 ```text
 spark_core
-   ├── spark-tui   (FTXUI)
-   └── spark-gui   (GTK4 / libadwaita)
+   ├── spark-client  (会话检测 / 分发)
+   ├── spark-tui     (FTXUI)
+   └── spark-gui     (GTK4 / libadwaita)
 ```
 
 不要在 GTK 代码里直接调用 `src/ui/app.cpp` 的 `App` 类。管理新闻、论坛、
@@ -31,8 +33,10 @@ src/
 ├── platform/
 │   ├── session.h        # 是否终端 / 是否有图形会话
 │   └── session.cpp
+├── entry/
+│   └── main.cpp         # spark-client：会话判断 + exec 前端
 ├── gtk/
-│   ├── main.cpp         # UI 模式判断 + AdwApplication
+│   ├── main.cpp         # AdwApplication（纯 GUI，不做判断）
 │   ├── application.*    # 应用生命周期、DBus 激活
 │   ├── window.*         # AdwApplicationWindow
 │   ├── pages/           # 主页 / 新闻 / 论坛 / 我的
@@ -41,11 +45,11 @@ src/
 └── ui/                  # 现有 FTXUI 前端，保持不动
 ```
 
-二进制名建议直接分开：
+二进制名直接分开：
 
-- `sparkapp-tui`：终端前端，行为不变；
-- `sparkapp-gui`：GTK 前端；
-- 可选 `spark`：只做 `auto` 判断并转发到上面两个之一。
+- `spark-client`：只做 `auto` 判断并 `exec` 下面两个之一，随 core 包发布；
+- `spark-tui`：终端前端，行为不变；
+- `spark-gui`：GTK 前端。
 
 分开二进制比“一个 exe 同时塞 FTXUI 和 GTK”更容易打包、测试和排查问题。
 
@@ -147,8 +151,18 @@ int main(int argc, char** argv) {
 
 ## 5. GUI / TUI 启动识别
 
+判断逻辑只放在 `sparkapp-core` 的入口 `spark-client` 里：
+
+- `spark-gui` 永远是 GUI，不做任何会话检测；
+- `spark-tui` 永远是 TUI，不做任何 GUI 判断；
+- `spark-client` 检测会话后 `exec` 对应前端，交给内核替换进程，不额外
+  派生常驻进程。
+
+之所以单独做一个入口：同一个 `.desktop` / 同一个命令，在终端、SSH、
+桌面启动器下应该落到不同前端，而前端本身不应该猜。
+
 不要只靠 `DISPLAY` 判断。终端里也可能有 `DISPLAY`，桌面启动器启动时
-stdout 也可能不是 TTY。推荐按以下优先级判断：
+stdout 也可能不是 TTY。启动器按以下优先级判断：
 
 1. 命令行显式指定：`--ui=tui` / `--ui=gtk`；
 2. 环境变量显式指定：`SPARK_UI=tui|gtk`；
@@ -219,8 +233,21 @@ UiMode DetectUiMode(UiMode requested) {
 }
 ```
 
-`spark-gui` 本身可以默认 `Gtk`，`spark-tui` 默认 `Tui`；只有可选的 `spark`
-启动器需要跑上面的 `Auto` 逻辑。
+`spark-gui` 固定 `Gtk`，`spark-tui` 固定 `Tui`；只有 `spark-client`
+需要跑上面的 `Auto` 逻辑，代码在 `src/entry/main.cpp`。
+
+前端查找顺序：先找 `spark-client` 同目录（Debian 下都在 `/usr/bin`，
+本地构建时都在 `build/`），再查 `PATH`。
+
+只安装 `sparkapp-core` 时，`spark-client` 必须给出明确错误而不是静默退出：
+
+```text
+未找到 spark-gui：请安装 sparkapp-gui 软件包（GTK 前端），
+或在终端安装 sparkapp-tui。
+```
+
+图形会话下会先尝试 `zenity`，再尝试 `kdialog`；两者都不存在时退回
+stderr。`spark-client` 不链接 GTK，所以 core 包不会因此新增 GTK 依赖。
 
 ### 5.3 从 TUI 启动 GUI
 
@@ -281,11 +308,16 @@ GUI 还需要 AppStream 元数据 `packaging/spark-gui.metainfo.xml`，包含
 `id`、`name`、`summary`、`description`、`launchable`、`provides` 和截图。
 `launchable` 必须和 desktop 文件名/应用 ID 对应。
 
-Debian 打包建议拆成两个二进制包：
+Debian 打包拆成三个二进制包：
 
+- `sparkapp-core`：共享库 + `spark-client` 入口，不依赖 GTK / FTXUI；
 - `sparkapp-tui`：TUI，依赖 `sparkapp-core`，不依赖 GTK；
 - `sparkapp-gui`：GTK 前端，依赖 `sparkapp-core` + GTK4 / libadwaita；
-- 两者共享同一个 `spark_core` 源码和配置目录，但可以独立安装。
+- 三者共享同一个 `spark_core` 源码和配置目录，但可以独立安装。
+
+`.desktop` 的 `Exec` 建议直接写 `spark-client`，这样同一个条目在终端、
+SSH、桌面启动器下都能落到正确的前端；只有需要强制 TUI 时才写
+`spark-tui`。
 
 如果暂时只做一个包，至少把 GUI 依赖放到 `Recommends`，不要让只想用 TUI 的
 用户被迫安装整套 GNOME 依赖。

@@ -63,6 +63,7 @@ App::App(Options opts, Config cfg)
       cfg_(std::move(cfg)),
       api_(cfg_.EffectiveMain(), cfg_.insecure, cfg_.token.plaintext),
       forumApi_(cfg_.EffectiveForum(), cfg_.insecure, cfg_.forum.token),
+      plugins_(&api_, &forumApi_, &cfg_),
       worker_([this] { screen_.PostEvent(Event::Custom); }, 4) {}
 
 int App::Run() {
@@ -75,6 +76,11 @@ int App::Run() {
   // The header shows "signed in" immediately; the display name arrives once
   // /me.json has loaded in the background.
   if (LoggedIn()) LoadMe();
+
+  // Optional plugins are loaded before the UI starts. Missing or broken
+  // modules are skipped by the host, so this never blocks startup.
+  plugins_.LoadAll();
+  pluginActions_ = plugins_.Actions();
 
   // Start on the home dashboard; news loads only when the user opens it.
   tab_ = Tab::Home;
@@ -2473,6 +2479,8 @@ Element App::Content() {
   if (mode_ == Mode::ForumLogin) return ForumLoginView();
   if (mode_ == Mode::Settings) return SettingsMenuView();
   if (mode_ == Mode::InstanceSettings) return InstanceSettingsView();
+  if (mode_ == Mode::PluginMenu) return PluginMenuView();
+  if (mode_ == Mode::PluginForm) return PluginFormView();
   if (mode_ == Mode::HomeManage) return HomeManageView();
   if (mode_ == Mode::ForumManage) return ForumManageView();
   if (mode_ == Mode::ForumApi) return ForumApiView();
@@ -3491,6 +3499,161 @@ Element App::InstanceSettingsView() {
   return vbox(std::move(lines)) | border;
 }
 
+
+Element App::PluginMenuView() {
+  const int width = std::max(20, screen_.dimx() - 6);
+  Elements lines;
+  lines.push_back(hbox({
+      text(T("插件动作", "Plugin actions")) | bold,
+      filler(),
+      text(std::to_string(pluginActions_.size()) +
+           T(" 个动作", " actions")) |
+          dim,
+  }));
+  lines.push_back(separator());
+
+  if (pluginActions_.empty()) {
+    lines.push_back(text(T("没有安装插件。",
+                           "No plugins are installed.")) |
+                    dim);
+    lines.push_back(
+        text(T("插件是可选包，安装后会自动出现在这里；不装不影响 TUI / GUI。",
+               "Plugins are optional packages and appear here once installed; "
+               "the TUI/GUI works without them.")) |
+        dim);
+    lines.push_back(text(""));
+    lines.push_back(text(T("扫描目录：", "Search paths:")) | dim);
+    for (const std::string& path : PluginSearchPaths()) {
+      lines.push_back(text("  " + Ellipsize(path, width)) | dim);
+    }
+    lines.push_back(text(""));
+    lines.push_back(text(T("Esc / q 返回", "Esc / q back")) | dim);
+    return vbox(std::move(lines)) | border;
+  }
+
+  for (int i = 0; i < static_cast<int>(pluginActions_.size()); ++i) {
+    const PluginAction& action = pluginActions_[i];
+    const bool selected = pluginMenu_.selected == i;
+    const Decorator style = selected ? Decorator(bold) : Decorator(nothing);
+
+    std::string pluginName = action.pluginId;
+    for (const PluginInfo& info : plugins_.Plugins()) {
+      if (info.id == action.pluginId) {
+        pluginName = info.name;
+        break;
+      }
+    }
+
+    Element line = hbox({
+        text(selected ? "▶ " : "  ") |
+            color(selected ? Color::Cyan : Color::GrayDark),
+        text(Ellipsize(action.title, std::max(10, width - 24))) | style,
+        filler(),
+        text(pluginName) | dim,
+    });
+    if (selected) line = line | inverted;
+    lines.push_back(line);
+    if (!action.description.empty()) {
+      lines.push_back(text("    " + Ellipsize(action.description,
+                                              std::max(10, width - 6))) |
+                      dim);
+    }
+  }
+
+  lines.push_back(separator());
+  lines.push_back(text(T("↑↓ 选择   Enter 打开   Esc / q 返回",
+                         "↑↓ select   Enter open   Esc / q back")) |
+                  dim);
+  return vbox(std::move(lines)) | border;
+}
+
+Element App::PluginFormView() {
+  if (pluginForm_.action < 0 ||
+      pluginForm_.action >= static_cast<int>(pluginActions_.size())) {
+    return PluginMenuView();
+  }
+  const PluginAction& action = pluginActions_[pluginForm_.action];
+  const int width = std::max(20, screen_.dimx() - 6);
+
+  std::string pluginName = action.pluginId;
+  for (const PluginInfo& info : plugins_.Plugins()) {
+    if (info.id == action.pluginId) {
+      pluginName = info.name;
+      break;
+    }
+  }
+
+  auto fieldRow = [&](int index) -> Element {
+    const PluginField& field = action.fields[index];
+    const bool active = !pluginForm_.busy && pluginForm_.field == index;
+    std::string& value = pluginForm_.values[index];
+    std::size_t cursor = std::min(pluginForm_.cursors[index], value.size());
+
+    Elements row;
+    row.push_back(text(active ? "▶ " : "  ") |
+                  color(active ? Color::Cyan : Color::GrayDark));
+    row.push_back(text(field.label + (field.required ? " *" : "")) | bold);
+    row.push_back(text("  "));
+    if (active) {
+      const std::size_t window = static_cast<std::size_t>(std::max(12, width - 8));
+      std::size_t start = cursor > window ? cursor - window : 0;
+      while (start > 0 &&
+             (static_cast<unsigned char>(value[start]) & 0xC0) == 0x80) {
+        --start;
+      }
+      std::string before = value.substr(start, cursor - start);
+      std::string after = value.substr(cursor, window);
+      if (start > 0) before = "…" + before;
+      row.push_back(text(before));
+      row.push_back(text("▏") | bold | color(Color::Cyan));
+      row.push_back(text(after));
+    } else if (value.empty()) {
+      row.push_back(text("—") | dim);
+    } else {
+      row.push_back(text(Ellipsize(value, std::max(10, width - 8))) | dim);
+    }
+    row.push_back(filler());
+    if (field.type == "multiline") {
+      row.push_back(text(T(" 多行", " multi-line")) | dim);
+    }
+    return hbox(std::move(row));
+  };
+
+  Elements lines;
+  lines.push_back(text(action.title) | bold);
+  lines.push_back(hbox({
+      text(pluginName) | dim,
+      text("  ") | dim,
+      text(Ellipsize(action.description,
+                     std::max(10, width - static_cast<int>(pluginName.size()) -
+                                      4))) |
+          dim,
+  }));
+  lines.push_back(separator());
+  if (action.fields.empty()) {
+    lines.push_back(text(T("这个动作不需要参数。", "This action needs no input.")) |
+                    dim);
+  } else {
+    for (int i = 0; i < static_cast<int>(action.fields.size()); ++i) {
+      lines.push_back(fieldRow(i));
+    }
+  }
+  lines.push_back(separator());
+  if (!pluginForm_.message.empty()) {
+    lines.push_back(text(pluginForm_.message) | color(Color::Yellow));
+  }
+  if (pluginForm_.busy) {
+    lines.push_back(text(T("执行中…", "Running…")) | color(Color::Yellow));
+  }
+  lines.push_back(
+      text(T("Tab / ↑↓ 切换字段   Enter 执行（多行字段打开编辑器）   "
+             "Ctrl-S 执行   Esc 返回",
+             "Tab / ↑↓ switch field   Enter run (multi-line fields open an "
+             "editor)   Ctrl-S run   Esc back")) |
+      dim);
+  return vbox(std::move(lines)) | border;
+}
+
 Element App::HelpView() {
   std::vector<std::string> rows;
   auto add = [&](const std::string& line) { rows.push_back(line); };
@@ -3501,6 +3664,7 @@ Element App::HelpView() {
   add(T("  Tab / Shift-Tab  切换标签", "  Tab / Shift-Tab  switch tabs"));
   add(T("  ?                打开 / 关闭帮助", "  ?                open / close help"));
   add(T("  s                设置", "  s                settings"));
+  add(T("  P                插件动作", "  P                plugin actions"));
   add(T("  l                临时切换语言（不保存）",
         "  l                switch language temporarily (not saved)"));
   add(T("  r                刷新当前页面", "  r                refresh current page"));
@@ -3599,6 +3763,18 @@ Element App::HelpView() {
     add(T("  Enter / Ctrl-S   保存", "  Enter / Ctrl-S   save"));
     add(T("  F5 / Ctrl-R      立即同步服务源", "  F5 / Ctrl-R      sync service source now"));
     add(T("  Esc              返回设置", "  Esc              back to settings"));
+  } else if (mode_ == Mode::PluginMenu) {
+    section("[插件动作]", "[Plugin actions]");
+    add(T("  ↑↓ / j k         选择动作", "  ↑↓ / j k         select an action"));
+    add(T("  Enter            打开", "  Enter            open"));
+    add(T("  Esc / q          返回", "  Esc / q          back"));
+  } else if (mode_ == Mode::PluginForm) {
+    section("[插件表单]", "[Plugin form]");
+    add(T("  Tab / ↑↓         切换字段", "  Tab / ↑↓         switch field"));
+    add(T("  Enter            执行（多行字段打开编辑器）",
+          "  Enter            run (multi-line fields open an editor)"));
+    add(T("  Ctrl-S           执行", "  Ctrl-S           run"));
+    add(T("  Esc              返回动作列表", "  Esc              back to the action list"));
   } else if (mode_ == Mode::LoginMenu) {
     section("[登录]", "[Sign-in]");
     add(T("  ↑↓ / j k         选择账号", "  ↑↓ / j k         select account"));
@@ -3753,6 +3929,12 @@ bool App::HandleEvent(Event event) {
   if (mode_ == Mode::InstanceSettings) {
     return HandleInstanceSettingsKey(std::move(event));
   }
+  if (mode_ == Mode::PluginMenu) {
+    return HandlePluginMenuKey(std::move(event));
+  }
+  if (mode_ == Mode::PluginForm) {
+    return HandlePluginFormKey(std::move(event));
+  }
 
   if (help_) {
     if (event == Event::Escape || event == Event::Character('?')) {
@@ -3799,6 +3981,10 @@ bool App::HandleEvent(Event event) {
   }
   if (event == Event::Character('s')) {
     OpenSettings();
+    return true;
+  }
+  if (event == Event::Character('P')) {
+    OpenPlugins();
     return true;
   }
   if (event == Event::Character('m')) {
@@ -4186,6 +4372,234 @@ bool App::HandleInstanceSettingsKey(Event event) {
       field.insert(settings_.cursor, character);
       settings_.cursor += character.size();
       return true;
+    }
+  }
+  return true;
+}
+
+
+void App::OpenPlugins() {
+  pluginMenu_ = PluginMenuState{};
+  mode_ = Mode::PluginMenu;
+  status_.clear();
+}
+
+void App::OpenPluginAction(int index) {
+  if (index < 0 || index >= static_cast<int>(pluginActions_.size())) return;
+  pluginForm_ = PluginFormState{};
+  pluginForm_.action = index;
+  for (const PluginField& field : pluginActions_[index].fields) {
+    pluginForm_.values.push_back(field.initial);
+    pluginForm_.cursors.push_back(field.initial.size());
+  }
+  mode_ = Mode::PluginForm;
+  status_.clear();
+}
+
+void App::RunPluginAction() {
+  if (pluginForm_.busy || pluginForm_.action < 0 ||
+      pluginForm_.action >= static_cast<int>(pluginActions_.size())) {
+    return;
+  }
+  const PluginAction action = pluginActions_[pluginForm_.action];
+
+  nlohmann::json input = nlohmann::json::object();
+  for (std::size_t i = 0; i < action.fields.size(); ++i) {
+    const PluginField& field = action.fields[i];
+    const std::string& value = pluginForm_.values[i];
+    if (field.required && Trim(value).empty()) {
+      pluginForm_.field = static_cast<int>(i);
+      pluginForm_.message = T("请填写: ", "Required: ") + field.label;
+      return;
+    }
+    input[field.key] = value;
+  }
+
+  pluginForm_.busy = true;
+  pluginForm_.message = T("正在执行…", "Running…");
+  const int generation = ++pluginForm_.generation;
+  const std::string pluginId = action.pluginId;
+  const std::string actionId = action.id;
+
+  worker_.Submit([this, pluginId, actionId, input, generation] {
+    nlohmann::json result;
+    std::string error;
+    const bool ok = plugins_.Run(pluginId, actionId, input, result, error);
+    worker_.Post([this, generation, ok, result, error] {
+      if (generation != pluginForm_.generation) return;
+      pluginForm_.busy = false;
+      if (!ok) {
+        pluginForm_.message = T("执行失败: ", "Failed: ") + error;
+        return;
+      }
+      const std::string message = result.value("message", std::string{});
+      const std::string refresh = result.value("refresh", std::string{});
+      mode_ = Mode::PluginMenu;
+      SetStatus(message.empty() ? T("完成", "Done") : message);
+      ApplyPluginRefresh(refresh);
+    });
+  });
+}
+
+void App::ApplyPluginRefresh(const std::string& target) {
+  if (target.empty()) return;
+  if (target == "news") {
+    home_ = HomeState{};
+    lists_[0] = ListState{};
+    detail_ = nlohmann::json::object();
+    detailTitle_.clear();
+    detailKind_.clear();
+    detailRaw_ = false;
+    detailLoading_ = false;
+    detailScroll_ = 0;
+    if (tab_ == Tab::Home) {
+      LoadHome();
+    } else if (tab_ == Tab::News) {
+      LoadList(Tab::News, false);
+    }
+    return;
+  }
+  if (target == "forum") {
+    forum_ = ForumState{};
+    forumThread_ = ForumThreadState{};
+    if (tab_ == Tab::Forum) LoadForum(false);
+    return;
+  }
+  if (target == "me") {
+    me_ = nlohmann::json::object();
+    meLoading_ = false;
+    if (tab_ == Tab::Me) LoadMe();
+  }
+}
+
+bool App::HandlePluginMenuKey(Event event) {
+  if (event == Event::Escape || event == Event::Character('q') ||
+      event == Event::Character('P')) {
+    mode_ = Mode::Browse;
+    status_.clear();
+    return true;
+  }
+  if (pluginActions_.empty()) return true;
+
+  const int count = static_cast<int>(pluginActions_.size());
+  if (event == Event::ArrowUp || event == Event::Character('k')) {
+    pluginMenu_.selected = (pluginMenu_.selected + count - 1) % count;
+    return true;
+  }
+  if (event == Event::ArrowDown || event == Event::Character('j')) {
+    pluginMenu_.selected = (pluginMenu_.selected + 1) % count;
+    return true;
+  }
+  if (event == Event::Home) {
+    pluginMenu_.selected = 0;
+    return true;
+  }
+  if (event == Event::End) {
+    pluginMenu_.selected = count - 1;
+    return true;
+  }
+  if (event == Event::Return || event == Event::Character(' ')) {
+    OpenPluginAction(pluginMenu_.selected);
+    return true;
+  }
+  return true;
+}
+
+bool App::HandlePluginFormKey(Event event) {
+  if (event == Event::Escape) {
+    mode_ = Mode::PluginMenu;
+    pluginForm_.message.clear();
+    return true;
+  }
+  if (pluginForm_.busy) return true;
+  if (pluginForm_.action < 0 ||
+      pluginForm_.action >= static_cast<int>(pluginActions_.size())) {
+    mode_ = Mode::PluginMenu;
+    return true;
+  }
+
+  const PluginAction& action = pluginActions_[pluginForm_.action];
+  const int count = static_cast<int>(action.fields.size());
+  const bool submit = event.input() == std::string(1, '\x13');
+  if (count == 0) {
+    if (submit || event == Event::Return || event == Event::Character(' ')) {
+      RunPluginAction();
+    }
+    return true;
+  }
+
+  if (event == Event::Tab || event == Event::ArrowDown) {
+    pluginForm_.field = (pluginForm_.field + 1) % count;
+    return true;
+  }
+  if (event == Event::TabReverse || event == Event::ArrowUp) {
+    pluginForm_.field = (pluginForm_.field + count - 1) % count;
+    return true;
+  }
+  if (event == Event::Return) {
+    if (action.fields[pluginForm_.field].type == "multiline") {
+      std::string error;
+      const auto edited = EditTextDocument(
+          pluginForm_.values[pluginForm_.field],
+          "spark-plugin-" + action.fields[pluginForm_.field].key, error);
+      if (edited) {
+        pluginForm_.values[pluginForm_.field] = *edited;
+        pluginForm_.cursors[pluginForm_.field] = edited->size();
+        pluginForm_.message.clear();
+      } else if (!error.empty()) {
+        pluginForm_.message = error;
+      }
+      return true;
+    }
+    RunPluginAction();
+    return true;
+  }
+  if (submit) {
+    RunPluginAction();
+    return true;
+  }
+
+  std::string& value = pluginForm_.values[pluginForm_.field];
+  std::size_t& cursor = pluginForm_.cursors[pluginForm_.field];
+
+  if (event == Event::Home) {
+    cursor = 0;
+    return true;
+  }
+  if (event == Event::End) {
+    cursor = value.size();
+    return true;
+  }
+  if (event == Event::ArrowLeft) {
+    cursor = Utf8Prev(value, cursor);
+    return true;
+  }
+  if (event == Event::ArrowRight) {
+    cursor = Utf8Next(value, cursor);
+    return true;
+  }
+  if (event == Event::Backspace) {
+    if (cursor > 0) {
+      const std::size_t previous = Utf8Prev(value, cursor);
+      value.erase(previous, cursor - previous);
+      cursor = previous;
+    }
+    return true;
+  }
+  if (event == Event::Delete) {
+    if (cursor < value.size()) {
+      const std::size_t next = Utf8Next(value, cursor);
+      value.erase(cursor, next - cursor);
+    }
+    return true;
+  }
+  if (event.is_character()) {
+    const std::string character = event.character();
+    if (character.size() == 1 &&
+        static_cast<unsigned char>(character[0]) >= 32 &&
+        character[0] != 127) {
+      value.insert(cursor, character);
+      cursor += character.size();
     }
   }
   return true;

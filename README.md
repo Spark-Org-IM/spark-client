@@ -516,8 +516,9 @@ GTK / GNOME 前端设计、GUI/TUI 启动检测、libadwaita 主题和打包方�
 [`dev-docs/GTK.md`](dev-docs/GTK.md)。
 
 可选插件（新闻管理、论坛管理等）以 `sparkapp-plugin-*` 独立包安装，运行时
-由 `spark_core` 的 C ABI 动态加载；前端包不依赖任何插件。插件接口、动作
-模型和安全边界见 [`dev-docs/PLUGINS.md`](dev-docs/PLUGINS.md)。
+由 `spark_core` 的 C ABI 动态加载；前端包不依赖任何插件。TUI 中按 `P` 打开
+插件动作列表。插件接口、动作模型和安全边界见
+[`dev-docs/PLUGINS.md`](dev-docs/PLUGINS.md)。
 
 ## API 文档
 

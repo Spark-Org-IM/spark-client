@@ -83,7 +83,18 @@ const spark_plugin_api* spark_plugin_entry(uint32_t host_abi_version);
 失败时返回 `{"ok": false, "message": "..."}`；`scopes` 供前端按令牌权限
 隐藏或禁用动作。
 
-## 4. 加载路径
+## 4. 在 TUI 里使用
+
+- 按 `P` 打开插件动作列表；没装插件时显示扫描目录。
+- `↑↓` 选择动作，`Enter` 打开表单。
+- `Tab` / `↑↓` 切换字段；文本字段直接输入。
+- `Enter` 执行；多行字段的 `Enter` 会调用 `$EDITOR` 编辑内容。
+- `Ctrl-S` 也可以执行；`Esc` 逐级返回。
+
+动作成功后插件可以返回 `{"refresh":"news"}`（也支持 `forum` / `me`），
+TUI 会清掉对应缓存并在当前页重新加载。
+
+## 5. 加载路径
 
 按顺序扫描：
 
@@ -95,7 +106,7 @@ const spark_plugin_api* spark_plugin_entry(uint32_t host_abi_version);
 
 同一个 id 只加载一次，重复的会被跳过。
 
-## 5. 构建与打包
+## 6. 构建与打包
 
 ```bash
 cmake -S . -B build -DSPARK_TUI_BUILD_PLUGINS=ON

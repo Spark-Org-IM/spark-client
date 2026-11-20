@@ -17,6 +17,7 @@
 #include "forum/client.h"
 #include "forum/models.h"
 #include "options.h"
+#include "plugin/host.h"
 #include "worker.h"
 
 namespace spark {
@@ -51,6 +52,8 @@ class App {
     Settings,          // settings menu
     InstanceSettings,  // service sources / instance addresses
     SourceReview,      // review source changes + token probes
+    PluginMenu,        // optional plugin action list
+    PluginForm,        // field form for one plugin action
   };
 
   enum class ForumAction {
@@ -205,6 +208,20 @@ class App {
     int generation = 0;
   };
 
+  struct PluginMenuState {
+    int selected = 0;
+  };
+
+  struct PluginFormState {
+    int action = 0;
+    int field = 0;
+    std::vector<std::string> values;
+    std::vector<std::size_t> cursors;
+    bool busy = false;
+    std::string message;
+    int generation = 0;
+  };
+
   struct SettingsState {
     int selected = 0;  // settings menu entry
     int field = 0;     // 0 sync, 1 main, 2 status, 3 forum
@@ -287,6 +304,10 @@ class App {
   void StartStartupSync();
   void OpenSettings();
   void OpenInstanceSettings();
+  void OpenPlugins();
+  void OpenPluginAction(int index);
+  void RunPluginAction();
+  void ApplyPluginRefresh(const std::string& target);
   bool SaveSettings();
   void SyncNow();
   void ApplyInstanceChange();
@@ -330,6 +351,8 @@ class App {
   ftxui::Element ForumLoginView();
   ftxui::Element SettingsMenuView();
   ftxui::Element InstanceSettingsView();
+  ftxui::Element PluginMenuView();
+  ftxui::Element PluginFormView();
   ftxui::Element HelpView();
 
   // Events ------------------------------------------------------------------
@@ -345,12 +368,15 @@ class App {
   bool HandleForumLoginKey(ftxui::Event event);
   bool HandleSettingsMenuKey(ftxui::Event event);
   bool HandleInstanceSettingsKey(ftxui::Event event);
+  bool HandlePluginMenuKey(ftxui::Event event);
+  bool HandlePluginFormKey(ftxui::Event event);
   std::string& SettingsField();
 
   Options opts_;
   Config cfg_;
   ApiClient api_;
   ForumClient forumApi_;
+  PluginHost plugins_;
   ftxui::ScreenInteractive screen_ =
       ftxui::ScreenInteractive::Fullscreen();
   Worker worker_;
@@ -397,6 +423,9 @@ class App {
   NewsHistoryState newsHistory_;
   ForumApiState forumApiTool_;
   SourceReviewState sourceReview_;
+  PluginMenuState pluginMenu_;
+  PluginFormState pluginForm_;
+  std::vector<PluginAction> pluginActions_;
 
   // Bumped whenever the user saves instance settings; a startup sync that
   // completes afterwards is discarded so it cannot overwrite newer values.

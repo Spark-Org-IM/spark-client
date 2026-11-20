@@ -279,6 +279,22 @@ Result<nlohmann::json> ApiClient::RevertHistory(const std::string& id) {
 
 Result<nlohmann::json> ApiClient::Me() { return GetJson("/api/v2/me.json"); }
 
+Result<nlohmann::json> ApiClient::RawRequest(const std::string& method,
+                                             const std::string& path,
+                                             const nlohmann::json& body) {
+  const std::string normalized = ToLower(Trim(method));
+  const std::string target = Trim(path);
+  if (target.empty()) {
+    return Result<nlohmann::json>::Err({0, "invalid_path", "路径不能为空"});
+  }
+  if (normalized == "get") return GetJson(target);
+  if (normalized == "post") {
+    return PostJson(target, body.is_null() ? nlohmann::json::object() : body);
+  }
+  return Result<nlohmann::json>::Err(
+      {0, "invalid_method", "仅支持 GET / POST"});
+}
+
 Result<DeviceCode> ApiClient::StartDeviceCode(
     const std::vector<std::string>& scopes) {
   nlohmann::json body = nlohmann::json::object();

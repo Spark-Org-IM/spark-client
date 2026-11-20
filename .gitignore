@@ -182,3 +182,4 @@ debian/*.debhelper.log
 debian/sparkapp-core/
 debian/sparkapp-tui/
 debian/sparkapp-gui/
+debian/sparkapp-plugin-news/

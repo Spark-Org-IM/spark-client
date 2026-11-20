@@ -36,3 +36,12 @@ Description: Spark ORG GTK client
  A GTK4 / libadwaita client for Spark ORG news, contacts, platforms and
  the Flarum forum. It follows the system theme, dark mode, accent color
  and high-contrast settings.
+
+Package: sparkapp-plugin-news
+Architecture: any
+Section: utils
+Depends: sparkapp-core (= ${binary:Version}), ${shlibs:Depends}, ${misc:Depends}
+Description: Spark ORG news management plugin
+ Optional plugin for the Spark ORG clients. Adds news editing, deletion
+ and home-page pick management actions. Requests are proxied by the
+ client, so the plugin never receives account tokens.

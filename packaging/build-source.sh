@@ -29,6 +29,7 @@ rm -rf "$stage/debian/.debhelper" "$stage/debian/tmp" \
        "$stage/debian/files" "$stage/debian/debhelper-build-stamp" \
        "$stage/debian/sparkapp-core" "$stage/debian/sparkapp-tui" \
        "$stage/debian/sparkapp-gui" \
+       "$stage/debian/sparkapp-plugin-news" \
        "$stage"/debian/*.substvars "$stage"/debian/*.debhelper.log
 sed -i "1s/^[^(]* ([^)]*)/${source_name} (${version})/" "$stage/debian/changelog"
 

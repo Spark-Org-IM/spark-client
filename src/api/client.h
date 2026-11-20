@@ -55,6 +55,13 @@ class ApiClient {
 
   Result<nlohmann::json> RevokeToken(const std::string& id);
 
+  // Generic authenticated JSON request used by plugins and the extension
+  // console. `path` is an absolute API path such as "/api/v2/news/save".
+  Result<nlohmann::json> RawRequest(const std::string& method,
+                                    const std::string& path,
+                                    const nlohmann::json& body =
+                                        nlohmann::json::object());
+
  private:
   using Query = std::vector<std::pair<std::string, std::string>>;
 

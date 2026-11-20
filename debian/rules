@@ -7,5 +7,6 @@ override_dh_auto_configure:
 	dh_auto_configure -- \
 		-DSPARK_TUI_USE_SYSTEM_FTXUI=ON \
 		-DSPARK_TUI_BUILD_GTK=ON \
+		-DSPARK_TUI_BUILD_PLUGINS=ON \
 		-DSPARK_TUI_BUILD_TESTS=ON \
 		-DCMAKE_INSTALL_LIBDIR=lib/$(DEB_HOST_MULTIARCH)

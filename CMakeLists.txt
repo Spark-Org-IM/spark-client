@@ -38,6 +38,7 @@ include(FetchContent)
 
 option(SPARK_TUI_BUILD_TESTS       "Build the unit tests"          ON)
 option(SPARK_TUI_BUILD_GTK         "Build the GTK4/libadwaita frontend" OFF)
+option(SPARK_TUI_BUILD_PLUGINS     "Build the optional admin plugins" OFF)
 option(SPARK_TUI_USE_SYSTEM_FTXUI  "Require a system-installed FTXUI (no fetch)" OFF)
 option(SPARK_TUI_USE_SYSTEM_JSON   "Use system nlohmann_json"      OFF)
 option(SPARK_TUI_USE_SYSTEM_HTTPLIB "Use system cpp-httplib"       OFF)
@@ -143,6 +144,7 @@ set(SPARK_CORE_SOURCES
   src/forum/models.cpp
   src/forum/render.cpp
   src/ui/render_detail.cpp
+  src/plugin/host.cpp
 )
 if(UNIX AND NOT APPLE)
   add_library(spark_core SHARED ${SPARK_CORE_SOURCES})
@@ -154,9 +156,11 @@ else()
   add_library(spark_core STATIC ${SPARK_CORE_SOURCES})
 endif()
 target_include_directories(spark_core PUBLIC src)
-target_link_libraries(spark_core PUBLIC spark_json spark_httplib PRIVATE spark_toml)
+target_link_libraries(spark_core PUBLIC spark_json spark_httplib
+  PRIVATE spark_toml ${CMAKE_DL_LIBS})
 target_compile_definitions(spark_core PRIVATE
-  SPARK_TUI_VERSION="${PROJECT_VERSION}")
+  SPARK_TUI_VERSION="${PROJECT_VERSION}"
+  SPARK_PLUGIN_DIR="${CMAKE_INSTALL_FULL_LIBDIR}/spark-client/plugins")
 target_compile_options(spark_core PRIVATE ${SPARK_TUI_WARNING_FLAGS})
 if(WIN32)
   # OpenUrl uses ShellExecuteA.
@@ -230,6 +234,29 @@ if(SPARK_TUI_BUILD_GTK)
 endif()
 
 # ---------------------------------------------------------------------------
+# Optional plugins
+#
+# Plugins are separate shared objects loaded at runtime. They only use the C
+# ABI in plugin/api.h, never link spark_core or GTK/FTXUI, and are packaged on
+# their own so a normal TUI/GUI install never pulls them in.
+# ---------------------------------------------------------------------------
+if(SPARK_TUI_BUILD_PLUGINS AND NOT WIN32)
+  add_library(spark-plugin-news-admin MODULE
+    plugins/news_admin/news_admin.cpp)
+  target_include_directories(spark-plugin-news-admin PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    "${CMAKE_CURRENT_SOURCE_DIR}/third_party")
+  target_compile_options(spark-plugin-news-admin PRIVATE
+    ${SPARK_TUI_WARNING_FLAGS})
+  set_target_properties(spark-plugin-news-admin PROPERTIES
+    PREFIX ""
+    OUTPUT_NAME "spark_news_admin")
+  install(TARGETS spark-plugin-news-admin
+          LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}/spark-client/plugins"
+          COMPONENT plugin-news)
+endif()
+
+# ---------------------------------------------------------------------------
 # Install
 # ---------------------------------------------------------------------------
 install(TARGETS spark_core
@@ -260,6 +287,14 @@ if(SPARK_TUI_BUILD_TESTS)
   target_link_libraries(spark-tui-tests PRIVATE spark_core)
   target_compile_options(spark-tui-tests PRIVATE ${SPARK_TUI_WARNING_FLAGS})
   add_test(NAME spark-tui-tests COMMAND spark-tui-tests)
+
+  if(SPARK_TUI_BUILD_PLUGINS AND NOT WIN32)
+    add_executable(spark-plugin-tests tests/test_plugin.cpp)
+    target_link_libraries(spark-plugin-tests PRIVATE spark_core)
+    target_compile_options(spark-plugin-tests PRIVATE ${SPARK_TUI_WARNING_FLAGS})
+    add_test(NAME spark-plugin-tests COMMAND spark-plugin-tests
+             "$<TARGET_FILE_DIR:spark-plugin-news-admin>")
+  endif()
 endif()
 
 # ---------------------------------------------------------------------------
@@ -268,8 +303,7 @@ endif()
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 set(CPACK_PACKAGE_NAME            "spark-client")
 set(CPACK_PACKAGE_VENDOR          "Spark ORG")
-set(CPACK_PACKAGE_DESCRIPTION_SUMMARY
-    "Spark ORG client (terminal and GTK frontends)")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Spark ORG client")
 set(CPACK_PACKAGE_VERSION         "${SPARK_TUI_PACKAGE_VERSION}")
 set(CPACK_PACKAGE_CONTACT         "Jianyin Li <jianyin@sparkorg.dpdns.org>")
 set(CPACK_RESOURCE_FILE_LICENSE   "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
@@ -283,15 +317,32 @@ set(_spark_tui_components core tui)
 if(SPARK_TUI_BUILD_GTK)
   list(APPEND _spark_tui_components gui)
 endif()
+set(CPACK_COMPONENT_CORE_DESCRIPTION
+    "Shared runtime: API and forum clients, configuration and the plugin loader.")
+set(CPACK_COMPONENT_TUI_DESCRIPTION
+    "Terminal frontend for Spark ORG news, contacts, platforms and the Flarum forum.")
+if(SPARK_TUI_BUILD_GTK)
+  set(CPACK_COMPONENT_GUI_DESCRIPTION
+      "GTK4 / libadwaita frontend for Spark ORG news, contacts, platforms and the Flarum forum.")
+endif()
+if(SPARK_TUI_BUILD_PLUGINS AND NOT WIN32)
+  list(APPEND _spark_tui_components plugin-news)
+  set(CPACK_COMPONENT_PLUGIN-NEWS_DESCRIPTION
+      "Optional plugin with news editing, deletion and home-page pick management.")
+endif()
 set(CPACK_COMPONENTS_ALL ${_spark_tui_components})
 set(CPACK_DEBIAN_CORE_PACKAGE_NAME "sparkapp-core")
 set(CPACK_DEBIAN_TUI_PACKAGE_NAME  "sparkapp-tui")
 set(CPACK_DEBIAN_GUI_PACKAGE_NAME  "sparkapp-gui")
+set(CPACK_DEBIAN_PLUGIN-NEWS_PACKAGE_NAME "sparkapp-plugin-news")
 # All binary packages come from the spark-client source package; reprepro
 # rejects a binary whose Source does not match the .dsc.
 set(CPACK_DEBIAN_CORE_PACKAGE_SOURCE "spark-client")
 set(CPACK_DEBIAN_TUI_PACKAGE_SOURCE  "spark-client")
 set(CPACK_DEBIAN_GUI_PACKAGE_SOURCE  "spark-client")
+if(SPARK_TUI_BUILD_PLUGINS AND NOT WIN32)
+  set(CPACK_DEBIAN_PLUGIN-NEWS_PACKAGE_SOURCE "spark-client")
+endif()
 
 if(SPARK_TUI_DEB_SHLIBDEPS)
   set(CPACK_DEBIAN_CORE_PACKAGE_SHLIBDEPS ON)
@@ -300,6 +351,11 @@ if(SPARK_TUI_DEB_SHLIBDEPS)
   if(SPARK_TUI_BUILD_GTK)
     set(CPACK_DEBIAN_GUI_PACKAGE_DEPENDS
         "sparkapp-core (= ${CPACK_PACKAGE_VERSION}), libgtk-4-1, libadwaita-1-0, libc6, libstdc++6")
+  endif()
+  if(SPARK_TUI_BUILD_PLUGINS AND NOT WIN32)
+    set(CPACK_DEBIAN_PLUGIN-NEWS_PACKAGE_SHLIBDEPS OFF)
+    set(CPACK_DEBIAN_PLUGIN-NEWS_PACKAGE_DEPENDS
+        "sparkapp-core (= ${CPACK_PACKAGE_VERSION}), libc6, libstdc++6")
   endif()
   set(_spark_tui_depends "sparkapp-core (= ${CPACK_PACKAGE_VERSION}), libc6, libstdc++6")
   if(SPARK_TUI_FTXUI_FROM_SYSTEM)
@@ -315,6 +371,11 @@ else()
   if(SPARK_TUI_BUILD_GTK)
     set(CPACK_DEBIAN_GUI_PACKAGE_DEPENDS
         "sparkapp-core (= ${CPACK_PACKAGE_VERSION}), libgtk-4-1, libadwaita-1-0, libc6, libstdc++6")
+  endif()
+  if(SPARK_TUI_BUILD_PLUGINS AND NOT WIN32)
+    set(CPACK_DEBIAN_PLUGIN-NEWS_PACKAGE_SHLIBDEPS OFF)
+    set(CPACK_DEBIAN_PLUGIN-NEWS_PACKAGE_DEPENDS
+        "sparkapp-core (= ${CPACK_PACKAGE_VERSION}), libc6, libstdc++6")
   endif()
   set(CPACK_DEBIAN_CORE_PACKAGE_DEPENDS
       "libc6, libstdc++6, libssl3t64 | libssl3")

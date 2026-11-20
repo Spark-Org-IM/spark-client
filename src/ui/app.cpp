@@ -3669,10 +3669,10 @@ Element App::PluginFormView() {
     lines.push_back(text(T("执行中…", "Running…")) | color(Color::Yellow));
   }
   lines.push_back(
-      text(T("Tab / ↑↓ 切换字段   Enter 执行（多行字段打开编辑器）   "
-             "Ctrl-S 执行   Esc 返回",
-             "Tab / ↑↓ switch field   Enter run (multi-line fields open an "
-             "editor)   Ctrl-S run   Esc back")) |
+      text(T("Tab / ↑↓ 切换字段   Enter 下一字段（最后一项执行；多行字段"
+             "打开编辑器）   Ctrl-R 执行   Esc 返回",
+             "Tab / ↑↓ switch field   Enter next field (run on the last one; "
+             "multi-line opens an editor)   Ctrl-R run   Esc back")) |
       dim);
   return vbox(std::move(lines)) | border;
 }
@@ -3794,9 +3794,10 @@ Element App::HelpView() {
   } else if (mode_ == Mode::PluginForm) {
     section("[插件表单]", "[Plugin form]");
     add(T("  Tab / ↑↓         切换字段", "  Tab / ↑↓         switch field"));
-    add(T("  Enter            执行（多行字段打开编辑器）",
-          "  Enter            run (multi-line fields open an editor)"));
-    add(T("  Ctrl-S           执行", "  Ctrl-S           run"));
+    add(T("  Enter            下一字段 / 最后一项执行（多行打开编辑器）",
+          "  Enter            next field / run on the last (multi-line opens "
+          "an editor)"));
+    add(T("  F5 / Ctrl-R      执行", "  F5 / Ctrl-R      run"));
     add(T("  Esc              返回动作列表", "  Esc              back to the action list"));
   } else if (mode_ == Mode::LoginMenu) {
     section("[登录]", "[Sign-in]");
@@ -4557,7 +4558,8 @@ bool App::HandlePluginFormKey(Event event) {
 
   const PluginAction& action = pluginActions_[pluginForm_.action];
   const int count = static_cast<int>(action.fields.size());
-  const bool submit = event.input() == std::string(1, '\x13');
+  const bool submit = event == Event::F5 ||
+                      event.input() == std::string(1, '\x12');
   if (count == 0) {
     if (submit || event == Event::Return || event == Event::Character(' ')) {
       RunPluginAction();
@@ -4588,7 +4590,13 @@ bool App::HandlePluginFormKey(Event event) {
       }
       return true;
     }
-    RunPluginAction();
+    // Text fields: Enter advances; the last field submits. F5 / Ctrl-R runs
+    // from anywhere so a multi-line field never needs to be the last one.
+    if (pluginForm_.field + 1 < count) {
+      ++pluginForm_.field;
+    } else {
+      RunPluginAction();
+    }
     return true;
   }
   if (submit) {

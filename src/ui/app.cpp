@@ -3617,7 +3617,8 @@ Element App::PluginFormView() {
     row.push_back(text(field.label + (field.required ? " *" : "")) | bold);
     row.push_back(text("  "));
     if (active) {
-      const std::size_t window = static_cast<std::size_t>(std::max(12, width - 8));
+      const std::size_t window =
+          static_cast<std::size_t>(std::max(12, width - 8));
       std::size_t start = cursor > window ? cursor - window : 0;
       while (start > 0 &&
              (static_cast<unsigned char>(value[start]) & 0xC0) == 0x80) {

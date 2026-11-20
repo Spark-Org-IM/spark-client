@@ -209,8 +209,8 @@ void PluginsPage::Build() {
     GtkWidget* row = MakeActionRow(action.title, subtitle,
                                    "application-x-addon-symbolic");
     g_object_set_data(G_OBJECT(row), "action-index", GINT_TO_POINTER(i + 1));
-    g_signal_connect(row, "activated", G_CALLBACK(&PluginsPage::OnActionActivated),
-                     this);
+    g_signal_connect(row, "activated",
+                     G_CALLBACK(&PluginsPage::OnActionActivated), this);
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(group), row);
   }
   gtk_box_append(GTK_BOX(content), group);

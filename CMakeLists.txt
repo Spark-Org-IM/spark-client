@@ -1,19 +1,18 @@
 cmake_minimum_required(VERSION 3.20)
 
-# VERSION is the single source of truth for the release version. It contains
-# the upstream version plus the Debian revision, for example `0.2.2-1`.
+# VERSION is the single source of truth for the release version and follows
+# SemVer: MAJOR.MINOR.PATCH, for example `0.3.0`.
 file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" SPARK_TUI_VERSION_LINE
      LIMIT_COUNT 1)
 string(STRIP "${SPARK_TUI_VERSION_LINE}" SPARK_TUI_VERSION_LINE)
-if(NOT SPARK_TUI_VERSION_LINE MATCHES "^([0-9]+\.[0-9]+\.[0-9]+)-([0-9]+)$")
-  message(FATAL_ERROR
-    "VERSION must look like <upstream>-<debian-revision>, e.g. 0.2.2-1")
+if(NOT SPARK_TUI_VERSION_LINE MATCHES "^([0-9]+\.[0-9]+\.[0-9]+)$")
+  message(FATAL_ERROR "VERSION must be a SemVer, e.g. 0.3.0")
 endif()
-set(SPARK_TUI_PROJECT_VERSION "${CMAKE_MATCH_1}"
-    CACHE STRING "spark-tui version" FORCE)
+set(SPARK_TUI_PROJECT_VERSION "${SPARK_TUI_VERSION_LINE}"
+    CACHE STRING "spark-client version" FORCE)
 set(SPARK_TUI_PACKAGE_VERSION "${SPARK_TUI_VERSION_LINE}"
-    CACHE STRING "spark-tui package version" FORCE)
-project(spark-tui VERSION ${SPARK_TUI_PROJECT_VERSION} LANGUAGES CXX)
+    CACHE STRING "spark-client package version" FORCE)
+project(spark-client VERSION ${SPARK_TUI_PROJECT_VERSION} LANGUAGES CXX)
 
 # Build-tree binaries are copied into the standalone Linux tarball, so their
 # rpath must not contain an absolute build directory. With this option CMake
@@ -267,10 +266,10 @@ endif()
 # CPack (DEB)
 # ---------------------------------------------------------------------------
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-set(CPACK_PACKAGE_NAME            "spark-tui")
+set(CPACK_PACKAGE_NAME            "spark-client")
 set(CPACK_PACKAGE_VENDOR          "Spark ORG")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY
-    "Terminal client for Spark ORG (news / contact / platform / forum)")
+    "Spark ORG client (terminal and GTK frontends)")
 set(CPACK_PACKAGE_VERSION         "${SPARK_TUI_PACKAGE_VERSION}")
 set(CPACK_PACKAGE_CONTACT         "Jianyin Li <jianyin@sparkorg.dpdns.org>")
 set(CPACK_RESOURCE_FILE_LICENSE   "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")

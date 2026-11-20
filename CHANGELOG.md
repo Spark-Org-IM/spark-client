@@ -15,18 +15,21 @@
 
 ### 构建
 
-- 版本号统一由根目录 `VERSION` 控制，`debian/changelog` 和 `vcpkg.json` 由
-  `packaging/sync-version.sh` 同步；
+- 版本号改为 SemVer（当前 `0.3.0`），去掉 Debian `-1` 修订后缀；`VERSION` 仍是
+  唯一来源，`debian/changelog` 和 `vcpkg.json` 由 `packaging/sync-version.sh`
+  同步；
 - GitHub Actions 多平台矩阵：Linux amd64 / arm64 生成 `.deb` 和独立可执行文件，
-  Windows amd64 / arm64 生成单 exe 的 `.zip`；
-- Debian 源码包：`.dsc` + `.orig.tar.gz` + `.debian.tar.xz` + `.changes` + `.buildinfo`；
+  Windows amd64 / arm64 生成单 exe 的 `.zip`；产物名统一为 `spark-client_*`；
+- Debian 源码包改为 native 格式：`.dsc` + `.tar.xz` + `.changes` + `.buildinfo`
+  （`debian/` 一并打进源码 tar）；
 - 二进制包拆分为 `sparkapp-core` / `sparkapp-tui` / `sparkapp-gui`，三个包可独立安装；
   TUI 不依赖 GTK，GUI 依赖 `sparkapp-core` + GTK4 / libadwaita，不依赖 FTXUI；
 - `sparkapp-core` 新增统一入口 `spark-client`，按会话启动 TUI 或 GTK 前端；
 - Linux 独立运行包内含 `libsparkapp-core.so`，rpath 为 `$ORIGIN`，解压即可运行；
-- 所有发布文件汇总为 `spark-tui_<version>_all.tar.gz` 总包；
 - push / PR 只构建并运行测试，方便合并前检查；`v*` tag 才打包、上传
   artifact 并汇总发布 Release；
+- Release 页面只发布一个完整总包 `spark-client_<version>_all.tar.gz`，
+  不再单独挂 `.deb`、源码包和 zip；
 - GTK 前端在独立的 `gtk-framework` 任务中做分支 / PR 构建检查；tag 时由
   Linux 任务生成 `sparkapp-gui` 的 `.deb`，但“解压即用”的 Linux tar 仍只带
   core + TUI。

@@ -1,7 +1,8 @@
-# spark-tui
+# spark-client
 
-Spark ORG API v2 的终端客户端，基于 [FTXUI](https://github.com/ArthurSonzogni/FTXUI)
-构建，使用 C++20。
+Spark ORG 客户端，包含终端前端 `spark-tui`（基于
+[FTXUI](https://github.com/ArthurSonzogni/FTXUI)）和 GTK4 / libadwaita 前端
+`spark-gui`，共享同一套 `spark_core`，使用 C++20。
 
 ## 功能
 
@@ -319,19 +320,21 @@ Flarum 2.x 的置顶 / 锁定 / 隐藏 / 重命名 / 标签通过
    ```
 3. `.github/workflows/ci.yml` 在 push / PR 时只做**构建和单元测试**，方便合并前
    快速检查；打包和上传产物只在 `v*` tag 上执行：
-   - Linux amd64 / arm64：`sparkapp-core` + `sparkapp-tui` 两个 `.deb`，以及
-     自包含运行包 `.tar.gz`；
+   - Linux amd64 / arm64：`sparkapp-core`、`sparkapp-tui`、`sparkapp-gui`
+     三个 `.deb`，以及自包含运行包 `.tar.gz`；
    - Windows amd64 / arm64：`.zip`（静态链接 OpenSSL，单 exe）；
-   - Debian 源码包：`.dsc` + `.orig.tar.gz` + `.debian.tar.xz` + `.changes` + `.buildinfo`；
+   - Debian 源码包（native）：`.dsc` + `.tar.xz` + `.changes` + `.buildinfo`；
    - GTK 前端 `spark-gui` 在独立的 `gtk-framework` 任务里做分支 / PR 的快速
      构建检查（仅当 `src/gtk/` 存在）；tag 构建时由 Linux 任务一并编译并生成
      `sparkapp-gui` 的 `.deb`，但它不会打进“解压即用”的 Linux tar 包。
 
-   tag 构建会把上述产物上传为 Actions artifact（保留 90 天）。
+   tag 构建会把上述产物上传为 Actions artifact（保留 90 天），并在 Release
+   页面只发布一个完整总包 `spark-client_<version>_all.tar.gz`，不再单独挂
+   `.deb` / `.dsc` / zip。
 4. 发布版本只需要推 tag：
    ```bash
-   git tag v0.2.2
-   git push origin v0.2.2
+   git tag v0.3.0
+   git push origin v0.3.0
    ```
    同一个 workflow 会创建 GitHub Release，并附上所有平台包和统一的
    `SHA256SUMS`。
@@ -343,26 +346,25 @@ Flarum 2.x 的置顶 / 锁定 / 隐藏 / 重命名 / 标签通过
    #   - core：共享库 + spark-client，不依赖 GTK
    #   - tui ：终端前端，不依赖 GTK
    #   - gui ：GTK 前端，依赖 core + libgtk-4-1 + libadwaita-1-0
-   sudo apt install ./sparkapp-core_0.2.2-1_amd64.deb \
-                    ./sparkapp-tui_0.2.2-1_amd64.deb
-   sudo apt install ./sparkapp-core_0.2.2-1_amd64.deb \
-                    ./sparkapp-gui_0.2.2-1_amd64.deb
+   sudo apt install ./sparkapp-core_0.3.0_amd64.deb \
+                    ./sparkapp-tui_0.3.0_amd64.deb
+   sudo apt install ./sparkapp-core_0.3.0_amd64.deb \
+                    ./sparkapp-gui_0.3.0_amd64.deb
 
    # 统一入口：按会话自动启动 spark-gui 或 spark-tui
    spark-client
 
    # 其它 Linux：解压后直接运行（包内已带 libsparkapp-core.so）
-   tar -xzf spark-tui_0.2.2_linux-amd64.tar.gz
-   ./spark-tui-0.2.2-linux-amd64/spark-tui
-   ./spark-tui-0.2.2-linux-amd64/spark-client   # 统一入口
+   tar -xzf spark-client_0.3.0_linux-amd64.tar.gz
+   ./spark-client-0.3.0-linux-amd64/spark-tui
+   ./spark-client-0.3.0-linux-amd64/spark-client   # 统一入口
    ```
-   Windows 解压 `spark-tui_0.2.2_windows-amd64.zip` 或
-   `spark-tui_0.2.2_windows-arm64.zip` 后运行 `spark-tui.exe`。
+   Windows 解压 `spark-client_0.3.0_windows-amd64.zip` 或
+   `spark-client_0.3.0_windows-arm64.zip` 后运行 `spark-tui.exe`。
 
-   所有发布文件还会打成一个总包
-   `spark-tui_0.2.2_all.tar.gz`，解压后是 `spark-tui-0.2.2/` 文件夹，
-   包含 `.deb`、Windows zip、Linux tar、源码包、`.changes`、`.buildinfo`
-   和内部 `SHA256SUMS`，可以直接作为手动导入 deb 源的目录。
+   Release 页面只提供完整总包 `spark-client_0.3.0_all.tar.gz`，解压后是
+   `spark-client-0.3.0/` 文件夹，包含三个 `.deb`、Windows zip、Linux tar、
+   Debian 源码包和内部 `SHA256SUMS`，可以直接作为手动导入 deb 源的目录。
 
    二进制包拆分为：
 
@@ -379,19 +381,19 @@ Flarum 2.x 的置顶 / 锁定 / 隐藏 / 重命名 / 标签通过
    终端 / SSH 启动 `spark-tui`；如果只装了 `sparkapp-core`，它会直接提示
    缺少哪个前端（图形会话下用 zenity/kdialog 弹窗），不会静默失败。
 
-   Debian 源码包（`.dsc` / `.orig.tar.*` / `.debian.tar.*` / `.changes` /
-   `.buildinfo` 都在同一个 artifact 里，文件名带 `0.2.2-1` 版本号）：
+   项目使用 Debian native 源码包（`debian/source/format` 为
+   `3.0 (native)`），所以只有一个 `.tar.xz`，`debian/` 也在里面：
    ```bash
-   dpkg-source -x spark-tui_0.2.2-1.dsc
-   cd spark-tui-0.2.2
+   dpkg-source -x spark-client_0.3.0.dsc
+   cd spark-client-0.3.0
    dpkg-buildpackage -us -uc
    ```
 
-   CI 生成源码包时使用 `dpkg-buildpackage -S -us -uc -sa`；`-sa` 会把
-   `orig.tar.*` 一并写进 `.changes`。
+   CI 生成源码包时使用 `dpkg-buildpackage -S -us -uc -d -nc`。
 
-0.x 阶段不使用 beta 后缀：重要测试节点直接打 `v0.2.2`，日常测试不推
-tag，直接使用 Actions artifact 即可。
+版本号遵循 SemVer（`MAJOR.MINOR.PATCH`，例如 `0.3.0`），不带 Debian
+修订后缀；重要测试节点直接打对应 tag（如 `v0.3.0`），日常测试不推 tag，
+直接使用 Actions artifact 即可。
 
 GitHub Actions 对公开仓库的标准 Linux runner **不计分钟数**；私有仓库
 免费额度是每月 2,000 分钟。当前项目一次完整构建通常几分钟，公开仓库
@@ -417,17 +419,17 @@ Gitea 忽略 `.github/workflows`，避免在没有 runner 时出现
 
 ## 版本号
 
-根目录的 `VERSION` 是唯一版本源，格式为：
+根目录的 `VERSION` 是唯一版本源，格式为 SemVer：
 
 ```text
-上游版本-Debian修订号
-0.2.2-1
+MAJOR.MINOR.PATCH
+0.3.0
 ```
 
 CMake 从这里生成：
 
-- `SPARK_TUI_PROJECT_VERSION`：`0.2.2`
-- `SPARK_TUI_PACKAGE_VERSION`：`0.2.2-1`
+- `SPARK_TUI_PROJECT_VERSION`：`0.3.0`
+- `SPARK_TUI_PACKAGE_VERSION`：`0.3.0`
 - 程序里的 `SPARK_TUI_VERSION`、`spark-tui --version`
 - `.deb` 文件名、Linux tar / Windows zip 文件名
 - Debian 源码包版本
@@ -439,8 +441,8 @@ packaging/sync-version.sh
 ```
 
 它会更新 `debian/changelog` 和 `vcpkg.json`。CI 会运行
-`packaging/sync-version.sh --check`，并校验 tag 必须等于
-`v${VERSION%-*}`，例如 `VERSION=0.2.2-1` 只能打 `v0.2.2`。
+`packaging/sync-version.sh --check`，并校验 tag 必须等于 `v${VERSION}`，
+例如 `VERSION=0.3.0` 只能打 `v0.3.0`。
 
 ## 打包 .deb
 

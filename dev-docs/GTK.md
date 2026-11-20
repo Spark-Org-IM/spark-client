@@ -1,6 +1,6 @@
 # GTK 前端开发指南
 
-本文说明如何在 `spark-tui` 的 `spark_core` 之上增加一个 GTK4 / libadwaita
+本文说明如何在 `spark-client` 的 `spark_core` 之上增加一个 GTK4 / libadwaita
 前端，并由统一入口 `spark-client` 决定当前会话该启动 TUI 还是 GUI。
 界面风格以 **GNOME / libadwaita** 为准，不另做一套自定义主题。
 

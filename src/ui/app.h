@@ -308,6 +308,8 @@ class App {
   void OpenPluginAction(int index);
   void RunPluginAction();
   void ApplyPluginRefresh(const std::string& target);
+  void RefreshVisiblePluginActions();
+  bool PluginActionAllowed(const PluginAction& action) const;
   bool SaveSettings();
   void SyncNow();
   void ApplyInstanceChange();
@@ -426,6 +428,7 @@ class App {
   PluginMenuState pluginMenu_;
   PluginFormState pluginForm_;
   std::vector<PluginAction> pluginActions_;
+  std::vector<int> visiblePluginActions_;  // indexes into pluginActions_
 
   // Bumped whenever the user saves instance settings; a startup sync that
   // completes afterwards is discarded so it cannot overwrite newer values.

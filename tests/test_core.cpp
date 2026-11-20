@@ -252,6 +252,7 @@ int main() {
     cfg.token.id = "42";
     cfg.token.label = "test";
     cfg.token.username = "jianyin";
+    cfg.token.scopes = {"news.edit", "profile.write"};
     cfg.forum.token = "flarum_test";
     cfg.forum.userId = "2";
     cfg.forum.username = "hoewllo";
@@ -286,6 +287,9 @@ int main() {
     CHECK(loaded.token.id == "42");
     CHECK(loaded.token.label == "test");
     CHECK(loaded.token.username == "jianyin");
+    CHECK(loaded.token.scopes.size() == 2);
+    CHECK(loaded.token.scopes[0] == "news.edit");
+    CHECK(loaded.token.scopes[1] == "profile.write");
     CHECK(loaded.forum.token == "flarum_test");
     CHECK(loaded.forum.userId == "2");
     CHECK(loaded.forum.username == "hoewllo");

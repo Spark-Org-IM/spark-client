@@ -54,7 +54,7 @@ class NewsAdminPlugin : public spark::plugin::Plugin {
         {"id", "home-add"},
         {"title", "加入主页置顶"},
         {"description", "把新闻加入主页置顶列表"},
-        {"scopes", {"home.edit", "news.edit"}},
+        {"scopes", {"news.edit"}},
         {"fields",
          json::array({
              {{"key", "slug"}, {"label", "Slug"}, {"type", "text"},
@@ -65,7 +65,7 @@ class NewsAdminPlugin : public spark::plugin::Plugin {
         {"id", "home-remove"},
         {"title", "移出主页置顶"},
         {"description", "把新闻从主页置顶列表移除"},
-        {"scopes", {"home.edit", "news.edit"}},
+        {"scopes", {"news.edit"}},
         {"fields",
          json::array({
              {{"key", "slug"}, {"label", "Slug"}, {"type", "text"},

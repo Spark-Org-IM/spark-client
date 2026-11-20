@@ -2,6 +2,7 @@
 
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace spark {
 
@@ -19,6 +20,10 @@ struct StoredToken {
   std::string id;
   std::string label;
   std::string username;
+  // Scopes of the current token, as reported when it was issued. Empty means
+  // unknown (for example a token saved before scopes were stored); frontends
+  // then keep every action visible.
+  std::vector<std::string> scopes;
 
   bool Empty() const { return plaintext.empty(); }
 };

@@ -80,8 +80,9 @@ const spark_plugin_api* spark_plugin_entry(uint32_t host_abi_version);
 {"ok": true, "message": "完成", "refresh": "news"}
 ```
 
-失败时返回 `{"ok": false, "message": "..."}`；`scopes` 供前端按令牌权限
-隐藏或禁用动作。
+失败时返回 `{"ok": false, "message": "..."}`；`scopes` 用来按令牌权限收起
+动作：登录时客户端会保存令牌返回的 scopes，前端只显示 scopes 全部满足的
+动作。旧令牌没有记录 scopes 时视为未知，全部显示，由服务端最终鉴权。
 
 ## 4. 在 TUI 里使用
 

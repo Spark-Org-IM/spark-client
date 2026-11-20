@@ -81,6 +81,7 @@ int App::Run() {
   // modules are skipped by the host, so this never blocks startup.
   plugins_.LoadAll();
   pluginActions_ = plugins_.Actions();
+  RefreshVisiblePluginActions();
 
   // Start on the home dashboard; news loads only when the user opens it.
   tab_ = Tab::Home;
@@ -1518,6 +1519,14 @@ void App::OnLoginSuccess(const DeviceToken& token) {
     }
     if (token.token.contains("label") && token.token["label"].is_string()) {
       cfg_.token.label = token.token["label"].get<std::string>();
+    }
+    cfg_.token.scopes.clear();
+    if (token.token.contains("scopes") && token.token["scopes"].is_array()) {
+      for (const auto& scope : token.token["scopes"]) {
+        if (scope.is_string()) {
+          cfg_.token.scopes.push_back(scope.get<std::string>());
+        }
+      }
     }
   }
 
@@ -3506,33 +3515,46 @@ Element App::PluginMenuView() {
   lines.push_back(hbox({
       text(T("插件动作", "Plugin actions")) | bold,
       filler(),
-      text(std::to_string(pluginActions_.size()) +
+      text(std::to_string(visiblePluginActions_.size()) +
            T(" 个动作", " actions")) |
           dim,
   }));
   lines.push_back(separator());
 
-  if (pluginActions_.empty()) {
-    lines.push_back(text(T("没有安装插件。",
-                           "No plugins are installed.")) |
-                    dim);
-    lines.push_back(
-        text(T("插件是可选包，安装后会自动出现在这里；不装不影响 TUI / GUI。",
-               "Plugins are optional packages and appear here once installed; "
-               "the TUI/GUI works without them.")) |
-        dim);
-    lines.push_back(text(""));
-    lines.push_back(text(T("扫描目录：", "Search paths:")) | dim);
-    for (const std::string& path : PluginSearchPaths()) {
-      lines.push_back(text("  " + Ellipsize(path, width)) | dim);
+  if (visiblePluginActions_.empty()) {
+    if (pluginActions_.empty()) {
+      lines.push_back(text(T("没有安装插件。",
+                             "No plugins are installed.")) |
+                      dim);
+      lines.push_back(
+          text(T("插件是可选包，安装后会自动出现在这里；不装不影响 TUI / GUI。",
+                 "Plugins are optional packages and appear here once installed; "
+                 "the TUI/GUI works without them.")) |
+          dim);
+      lines.push_back(text(""));
+      lines.push_back(text(T("扫描目录：", "Search paths:")) | dim);
+      for (const std::string& path : PluginSearchPaths()) {
+        lines.push_back(text("  " + Ellipsize(path, width)) | dim);
+      }
+    } else {
+      lines.push_back(
+          text(T("当前令牌没有可用的插件动作（缺少对应 scopes）。",
+                 "The current token has no matching plugin actions "
+                 "(missing scopes).")) |
+          color(Color::Yellow));
+      lines.push_back(
+          text(T("重新登录获取完整权限，或在服务端给账号授权。",
+                 "Sign in again for full permissions, or grant them on the "
+                 "server.")) |
+          dim);
     }
     lines.push_back(text(""));
     lines.push_back(text(T("Esc / q 返回", "Esc / q back")) | dim);
     return vbox(std::move(lines)) | border;
   }
 
-  for (int i = 0; i < static_cast<int>(pluginActions_.size()); ++i) {
-    const PluginAction& action = pluginActions_[i];
+  for (int i = 0; i < static_cast<int>(visiblePluginActions_.size()); ++i) {
+    const PluginAction& action = pluginActions_[visiblePluginActions_[i]];
     const bool selected = pluginMenu_.selected == i;
     const Decorator style = selected ? Decorator(bold) : Decorator(nothing);
 
@@ -4379,9 +4401,34 @@ bool App::HandleInstanceSettingsKey(Event event) {
 
 
 void App::OpenPlugins() {
+  RefreshVisiblePluginActions();
   pluginMenu_ = PluginMenuState{};
   mode_ = Mode::PluginMenu;
   status_.clear();
+}
+
+void App::RefreshVisiblePluginActions() {
+  visiblePluginActions_.clear();
+  for (int i = 0; i < static_cast<int>(pluginActions_.size()); ++i) {
+    if (PluginActionAllowed(pluginActions_[i])) {
+      visiblePluginActions_.push_back(i);
+    }
+  }
+}
+
+bool App::PluginActionAllowed(const PluginAction& action) const {
+  if (action.scopes.empty() || cfg_.token.scopes.empty()) return true;
+  if (std::find(cfg_.token.scopes.begin(), cfg_.token.scopes.end(), "*") !=
+      cfg_.token.scopes.end()) {
+    return true;
+  }
+  for (const std::string& scope : action.scopes) {
+    if (std::find(cfg_.token.scopes.begin(), cfg_.token.scopes.end(), scope) ==
+        cfg_.token.scopes.end()) {
+      return false;
+    }
+  }
+  return true;
 }
 
 void App::OpenPluginAction(int index) {
@@ -4479,9 +4526,9 @@ bool App::HandlePluginMenuKey(Event event) {
     status_.clear();
     return true;
   }
-  if (pluginActions_.empty()) return true;
+  if (visiblePluginActions_.empty()) return true;
 
-  const int count = static_cast<int>(pluginActions_.size());
+  const int count = static_cast<int>(visiblePluginActions_.size());
   if (event == Event::ArrowUp || event == Event::Character('k')) {
     pluginMenu_.selected = (pluginMenu_.selected + count - 1) % count;
     return true;
@@ -4499,7 +4546,7 @@ bool App::HandlePluginMenuKey(Event event) {
     return true;
   }
   if (event == Event::Return || event == Event::Character(' ')) {
-    OpenPluginAction(pluginMenu_.selected);
+    OpenPluginAction(visiblePluginActions_[pluginMenu_.selected]);
     return true;
   }
   return true;

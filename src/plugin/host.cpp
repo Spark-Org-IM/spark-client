@@ -140,9 +140,6 @@ struct PluginHost::Loaded {
 PluginHost::PluginHost(ApiClient* api, ForumClient* forum,
                        const Config* config)
     : api_(api), forum_(forum), config_(config), dataRoot_(PluginDataRoot()) {
-  std::error_code ec;
-  std::filesystem::create_directories(dataRoot_, ec);
-
   hostApi_.struct_size = sizeof(spark_host_api);
   hostApi_.abi_version = SPARK_PLUGIN_ABI_VERSION;
   hostApi_.userdata = this;
@@ -295,6 +292,11 @@ int PluginHost::LoadFile(const std::string& path) {
       if (!action.id.empty()) loaded->actions.push_back(std::move(action));
     }
   }
+
+  // Only create the private data directory once a plugin actually loads, so
+  // an install without plugins leaves the home directory untouched.
+  std::error_code ec;
+  std::filesystem::create_directories(dataRoot_, ec);
 
   plugins_.push_back(plugin);
   loaded_.push_back(std::move(loaded));

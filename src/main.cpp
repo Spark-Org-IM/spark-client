@@ -5,6 +5,7 @@
 
 #include "config.h"
 #include "options.h"
+#include "platform/session.h"
 #include "ui/app.h"
 #include "util.h"
 
@@ -62,6 +63,11 @@ int main(int argc, char** argv) {
   }
   if (!opts.language.empty()) cfg.language = opts.language;
   if (opts.insecure) cfg.insecure = true;
+
+  if (spark::ParseUiMode(opts.ui) == spark::UiMode::Gtk) {
+    std::cerr << "GTK 前端请运行 spark-gui 或 spark-client\n";
+    return 2;
+  }
 
   spark::App app(std::move(opts), std::move(cfg));
   return app.Run();

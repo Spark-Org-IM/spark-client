@@ -596,9 +596,9 @@ void App::RunForumAction(ForumAction action) {
 
   if (action == ForumAction::Delete) {
     forumManage_.message = T("正在删除主题…", "Deleting the discussion…");
-    worker_.Submit([this, id, generation, from_detail] {
+    worker_.Submit([this, id, generation] {
       auto result = forumApi_.DeleteDiscussion(id);
-      worker_.Post([this, generation, result, from_detail] {
+      worker_.Post([this, generation, result] {
         if (generation != forumManage_.generation) return;
         forumManage_.busy = false;
         if (!result.ok) {

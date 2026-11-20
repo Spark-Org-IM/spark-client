@@ -170,3 +170,15 @@ compile_commands.json
 *.pem
 *.key
 secrets/
+
+# ---------- Debian packaging ----------
+obj-*/
+debian/.debhelper/
+debian/debhelper-build-stamp
+debian/files
+debian/tmp/
+debian/*.substvars
+debian/*.debhelper.log
+debian/sparkapp-core/
+debian/sparkapp-tui/
+debian/sparkapp-gui/

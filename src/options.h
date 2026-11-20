@@ -11,6 +11,7 @@ struct Options {
   std::string forumUrl;  // manual Flarum forum override
   std::string language;
   std::string configPath;
+  std::string ui;         // auto / tui / gtk (--ui)
   bool insecure = false;
   bool noSync = false;
   bool showHelp = false;

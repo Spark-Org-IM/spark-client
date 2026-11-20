@@ -1,0 +1,3 @@
+usr/bin/spark-client
+usr/lib/*/libsparkapp-core.so*
+usr/share/icons/hicolor/scalable/apps/spark-tui.svg

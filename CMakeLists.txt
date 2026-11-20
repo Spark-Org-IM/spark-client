@@ -1,11 +1,25 @@
 cmake_minimum_required(VERSION 3.20)
 
-# CI stamps these from the release tag. The project version must stay numeric;
-# the package version may use Debian's tilde suffix (`0.2.0~beta.1`).
-set(SPARK_TUI_PROJECT_VERSION "0.2.0" CACHE STRING "spark-tui version")
-set(SPARK_TUI_PACKAGE_VERSION "${SPARK_TUI_PROJECT_VERSION}-1"
-    CACHE STRING "spark-tui package version")
+# VERSION is the single source of truth for the release version. It contains
+# the upstream version plus the Debian revision, for example `0.2.2-1`.
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" SPARK_TUI_VERSION_LINE
+     LIMIT_COUNT 1)
+string(STRIP "${SPARK_TUI_VERSION_LINE}" SPARK_TUI_VERSION_LINE)
+if(NOT SPARK_TUI_VERSION_LINE MATCHES "^([0-9]+\.[0-9]+\.[0-9]+)-([0-9]+)$")
+  message(FATAL_ERROR
+    "VERSION must look like <upstream>-<debian-revision>, e.g. 0.2.2-1")
+endif()
+set(SPARK_TUI_PROJECT_VERSION "${CMAKE_MATCH_1}"
+    CACHE STRING "spark-tui version" FORCE)
+set(SPARK_TUI_PACKAGE_VERSION "${SPARK_TUI_VERSION_LINE}"
+    CACHE STRING "spark-tui package version" FORCE)
 project(spark-tui VERSION ${SPARK_TUI_PROJECT_VERSION} LANGUAGES CXX)
+
+# Build-tree binaries are copied into the standalone Linux tarball, so their
+# rpath must not contain an absolute build directory. With this option CMake
+# rewrites it to $ORIGIN, which is valid both in the build tree and in the
+# extracted tarball.
+set(CMAKE_BUILD_RPATH_USE_ORIGIN ON)
 
 # ---------------------------------------------------------------------------
 # Language / build defaults
@@ -24,6 +38,7 @@ include(GNUInstallDirs)
 include(FetchContent)
 
 option(SPARK_TUI_BUILD_TESTS       "Build the unit tests"          ON)
+option(SPARK_TUI_BUILD_GTK         "Build the GTK4/libadwaita frontend" OFF)
 option(SPARK_TUI_USE_SYSTEM_FTXUI  "Require a system-installed FTXUI (no fetch)" OFF)
 option(SPARK_TUI_USE_SYSTEM_JSON   "Use system nlohmann_json"      OFF)
 option(SPARK_TUI_USE_SYSTEM_HTTPLIB "Use system cpp-httplib"       OFF)
@@ -115,10 +130,13 @@ endif()
 # ---------------------------------------------------------------------------
 # Core library (config, HTTP, API models) — no FTXUI dependency
 # ---------------------------------------------------------------------------
-add_library(spark_core STATIC
+set(SPARK_CORE_SOURCES
   src/util.cpp
+  src/worker.cpp
   src/i18n.cpp
   src/config.cpp
+  src/options.cpp
+  src/platform/session.cpp
   src/service_source.cpp
   src/api/client.cpp
   src/api/models.cpp
@@ -127,6 +145,15 @@ add_library(spark_core STATIC
   src/forum/render.cpp
   src/ui/render_detail.cpp
 )
+if(UNIX AND NOT APPLE)
+  add_library(spark_core SHARED ${SPARK_CORE_SOURCES})
+  set_target_properties(spark_core PROPERTIES
+    OUTPUT_NAME sparkapp-core
+    VERSION ${PROJECT_VERSION}
+    SOVERSION 0)
+else()
+  add_library(spark_core STATIC ${SPARK_CORE_SOURCES})
+endif()
 target_include_directories(spark_core PUBLIC src)
 target_link_libraries(spark_core PUBLIC spark_json spark_httplib PRIVATE spark_toml)
 target_compile_definitions(spark_core PRIVATE
@@ -142,30 +169,88 @@ endif()
 # ---------------------------------------------------------------------------
 add_executable(spark-tui
   src/main.cpp
-  src/options.cpp
-  src/ui/worker.cpp
   src/ui/app.cpp
 )
 target_link_libraries(spark-tui PRIVATE
   spark_core ftxui::screen ftxui::dom ftxui::component)
+# Standalone Linux tarballs ship libsparkapp-core.so next to the binaries.
+set_target_properties(spark-tui PROPERTIES
+  BUILD_RPATH "$ORIGIN" INSTALL_RPATH "$ORIGIN")
 target_compile_definitions(spark-tui PRIVATE
   SPARK_TUI_VERSION="${PROJECT_VERSION}")
 target_compile_options(spark-tui PRIVATE ${SPARK_TUI_WARNING_FLAGS})
 
 # ---------------------------------------------------------------------------
+# Dispatcher (ships with sparkapp-core, picks spark-gui or spark-tui)
+# ---------------------------------------------------------------------------
+if(UNIX AND NOT APPLE)
+  add_executable(spark-client src/entry/main.cpp)
+  target_link_libraries(spark-client PRIVATE spark_core)
+  set_target_properties(spark-client PROPERTIES
+    BUILD_RPATH "$ORIGIN" INSTALL_RPATH "$ORIGIN")
+  target_compile_definitions(spark-client PRIVATE
+    SPARK_TUI_VERSION="${PROJECT_VERSION}")
+  target_compile_options(spark-client PRIVATE ${SPARK_TUI_WARNING_FLAGS})
+endif()
+
+# ---------------------------------------------------------------------------
+# GTK / libadwaita frontend (code-only framework; packaging comes later)
+# ---------------------------------------------------------------------------
+if(SPARK_TUI_BUILD_GTK)
+  if(WIN32)
+    message(FATAL_ERROR "SPARK_TUI_BUILD_GTK is currently supported on Linux only")
+  endif()
+  find_package(PkgConfig REQUIRED)
+  pkg_check_modules(GTK4 REQUIRED IMPORTED_TARGET gtk4)
+  pkg_check_modules(ADWAITA REQUIRED IMPORTED_TARGET libadwaita-1)
+
+  add_executable(spark-gui
+    src/gtk/main.cpp
+    src/gtk/application.cpp
+    src/gtk/widgets.cpp
+    src/gtk/detail.cpp
+    src/gtk/pages/home_page.cpp
+    src/gtk/pages/list_page.cpp
+    src/gtk/pages/forum_page.cpp
+    src/gtk/pages/me_page.cpp
+  )
+  target_link_libraries(spark-gui PRIVATE
+    spark_core
+    PkgConfig::GTK4
+    PkgConfig::ADWAITA
+  )
+  target_compile_definitions(spark-gui PRIVATE
+    SPARK_TUI_VERSION="${PROJECT_VERSION}")
+  target_compile_options(spark-gui PRIVATE ${SPARK_TUI_WARNING_FLAGS})
+
+  install(TARGETS spark-gui
+          RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}" COMPONENT gui)
+  install(FILES packaging/spark-gui.desktop
+          DESTINATION "${CMAKE_INSTALL_DATADIR}/applications"
+          COMPONENT gui)
+endif()
+
+# ---------------------------------------------------------------------------
 # Install
 # ---------------------------------------------------------------------------
-install(TARGETS spark-tui RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+install(TARGETS spark_core
+        LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}" COMPONENT core
+        ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}" COMPONENT core
+        RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}" COMPONENT core)
+if(UNIX AND NOT APPLE)
+  install(TARGETS spark-client
+          RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}" COMPONENT core)
+endif()
+install(TARGETS spark-tui
+        RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}" COMPONENT tui)
 install(FILES packaging/spark-tui.desktop
-        DESTINATION "${CMAKE_INSTALL_DATADIR}/applications")
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/applications"
+        COMPONENT tui)
+# Shared by the TUI and GTK desktop entries, so it ships with sparkapp-core
+# instead of being duplicated (and conflicting) in both frontend packages.
 install(FILES packaging/spark-tui.svg
-        DESTINATION "${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps")
-install(DIRECTORY docs/api-v2
-        DESTINATION "${CMAKE_INSTALL_DATADIR}/doc/spark-tui")
-install(FILES README.md LICENSE
-        DESTINATION "${CMAKE_INSTALL_DATADIR}/doc/spark-tui")
-install(FILES docs/config.example.toml
-        DESTINATION "${CMAKE_INSTALL_DATADIR}/doc/spark-tui")
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps"
+        COMPONENT core)
 
 # ---------------------------------------------------------------------------
 # Tests
@@ -193,18 +278,44 @@ set(CPACK_DEBIAN_PACKAGE_SECTION  "utils")
 set(CPACK_DEBIAN_PACKAGE_PRIORITY "optional")
 option(SPARK_TUI_DEB_SHLIBDEPS
        "Let dpkg-shlibdeps compute the runtime dependencies" ON)
+
+set(CPACK_DEB_COMPONENT_INSTALL ON)
+set(_spark_tui_components core tui)
+if(SPARK_TUI_BUILD_GTK)
+  list(APPEND _spark_tui_components gui)
+endif()
+set(CPACK_COMPONENTS_ALL ${_spark_tui_components})
+set(CPACK_DEBIAN_CORE_PACKAGE_NAME "sparkapp-core")
+set(CPACK_DEBIAN_TUI_PACKAGE_NAME  "sparkapp-tui")
+set(CPACK_DEBIAN_GUI_PACKAGE_NAME  "sparkapp-gui")
+
 if(SPARK_TUI_DEB_SHLIBDEPS)
-  set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
-  # Let dpkg-shlibdeps compute all runtime dependencies (OpenSSL, FTXUI, ...).
-  set(CPACK_DEBIAN_PACKAGE_DEPENDS "")
-else()
-  set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS OFF)
-  set(_spark_deb_depends "libc6, libstdc++6, libssl3t64 | libssl3")
+  set(CPACK_DEBIAN_CORE_PACKAGE_SHLIBDEPS ON)
+  set(CPACK_DEBIAN_TUI_PACKAGE_SHLIBDEPS OFF)
+  set(CPACK_DEBIAN_GUI_PACKAGE_SHLIBDEPS OFF)
+  if(SPARK_TUI_BUILD_GTK)
+    set(CPACK_DEBIAN_GUI_PACKAGE_DEPENDS
+        "sparkapp-core (= ${CPACK_PACKAGE_VERSION}), libgtk-4-1, libadwaita-1-0, libc6, libstdc++6")
+  endif()
+  set(_spark_tui_depends "sparkapp-core (= ${CPACK_PACKAGE_VERSION}), libc6, libstdc++6")
   if(SPARK_TUI_FTXUI_FROM_SYSTEM)
-    string(APPEND _spark_deb_depends
+    string(APPEND _spark_tui_depends
       ", libftxui-screen5.0.0, libftxui-dom5.0.0, libftxui-component5.0.0")
   endif()
-  set(CPACK_DEBIAN_PACKAGE_DEPENDS "${_spark_deb_depends}")
+  set(CPACK_DEBIAN_TUI_PACKAGE_DEPENDS "${_spark_tui_depends}")
+  set(CPACK_DEBIAN_CORE_PACKAGE_DEPENDS "")
+else()
+  set(CPACK_DEBIAN_CORE_PACKAGE_SHLIBDEPS OFF)
+  set(CPACK_DEBIAN_TUI_PACKAGE_SHLIBDEPS OFF)
+  set(CPACK_DEBIAN_GUI_PACKAGE_SHLIBDEPS OFF)
+  if(SPARK_TUI_BUILD_GTK)
+    set(CPACK_DEBIAN_GUI_PACKAGE_DEPENDS
+        "sparkapp-core (= ${CPACK_PACKAGE_VERSION}), libgtk-4-1, libadwaita-1-0, libc6, libstdc++6")
+  endif()
+  set(CPACK_DEBIAN_CORE_PACKAGE_DEPENDS
+      "libc6, libstdc++6, libssl3t64 | libssl3")
+  set(CPACK_DEBIAN_TUI_PACKAGE_DEPENDS
+      "sparkapp-core (= ${CPACK_PACKAGE_VERSION}), libc6, libstdc++6")
 endif()
 set(CPACK_DEBIAN_FILE_NAME        DEB-DEFAULT)
 set(CPACK_GENERATOR               "DEB")

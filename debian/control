@@ -2,16 +2,37 @@ Source: spark-tui
 Section: utils
 Priority: optional
 Maintainer: Jianyin Li <jianyin@sparkorg.dpdns.org>
-Build-Depends: debhelper-compat (= 13), cmake, ninja-build, libssl-dev, libftxui-dev
+Build-Depends: debhelper-compat (= 13), cmake, ninja-build, libssl-dev,
+               libftxui-dev, libgtk-4-dev, libadwaita-1-dev, pkg-config
 Standards-Version: 4.7.0
 Rules-Requires-Root: no
 Homepage: https://github.com/Spark-Org-IM/spark-client
 Vcs-Git: https://github.com/Spark-Org-IM/spark-client.git
 Vcs-Browser: https://github.com/Spark-Org-IM/spark-client
 
-Package: spark-tui
+Package: sparkapp-core
 Architecture: any
+Section: libs
 Depends: ${shlibs:Depends}, ${misc:Depends}
+Description: shared core library and launcher for Spark ORG clients
+ Common configuration, Spark ORG API, Flarum API and service-source logic
+ used by the Spark ORG terminal and GTK frontends, plus the spark-client
+ launcher which starts the frontend that matches the current session.
+
+Package: sparkapp-tui
+Architecture: any
+Section: utils
+Depends: sparkapp-core (= ${binary:Version}), ${shlibs:Depends}, ${misc:Depends}
 Description: Spark ORG terminal client
  A terminal client for Spark ORG news, contacts, platforms and the
  Flarum forum, built with C++20 and FTXUI.
+
+# GTK4 / libadwaita runtime dependencies are filled in by dpkg-shlibdeps.
+Package: sparkapp-gui
+Architecture: any
+Section: utils
+Depends: sparkapp-core (= ${binary:Version}), ${shlibs:Depends}, ${misc:Depends}
+Description: Spark ORG GTK client
+ A GTK4 / libadwaita client for Spark ORG news, contacts, platforms and
+ the Flarum forum. It follows the system theme, dark mode, accent color
+ and high-contrast settings.

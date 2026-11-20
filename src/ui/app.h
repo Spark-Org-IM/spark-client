@@ -17,7 +17,7 @@
 #include "forum/client.h"
 #include "forum/models.h"
 #include "options.h"
-#include "ui/worker.h"
+#include "worker.h"
 
 namespace spark {
 

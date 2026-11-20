@@ -38,7 +38,13 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            build-essential cmake ninja-build libssl-dev dpkg-dev
+            build-essential cmake ninja-build libssl-dev dpkg-dev patchelf file
+
+      - name: Install GTK packaging dependencies
+        if: github.ref_type == 'tag'
+        run: |
+          sudo apt-get install -y --no-install-recommends \
+            libgtk-4-dev libadwaita-1-dev pkg-config
 
       - name: Cache FTXUI source (fallback build)
         uses: actions/cache@v6
@@ -48,18 +54,18 @@ jobs:
 
       - name: Configure
         run: |
-          args=(-S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release)
-          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
-            raw="${GITHUB_REF_NAME#v}"
-            version="${raw%%-*}"
-            args+=(
-              "-DSPARK_TUI_PROJECT_VERSION=${version}"
-              "-DSPARK_TUI_PACKAGE_VERSION=${version}-1"
-            )
-          else
-            args+=("-DSPARK_TUI_PACKAGE_VERSION=$(dpkg-parsechangelog -SVersion)")
+          version=$(head -n 1 VERSION | tr -d '[:space:]')
+          project="${version%-*}"
+          if [ "${GITHUB_REF_TYPE}" = "tag" ] && [ "${GITHUB_REF_NAME}" != "v${project}" ]; then
+            echo "tag ${GITHUB_REF_NAME} does not match VERSION v${project}" >&2
+            exit 1
           fi
-          cmake "${args[@]}"
+          # Only tag builds package sparkapp-gui, so the GUI is compiled
+          # into this build tree exclusively for releases.
+          gtk=OFF
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then gtk=ON; fi
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DSPARK_TUI_BUILD_GTK=$gtk
 
       - name: Build
         run: cmake --build build --parallel 4
@@ -67,19 +73,44 @@ jobs:
       - name: Test
         run: ctest --test-dir build --output-on-failure
 
+      # Pushing a branch only compiles and tests. Release artifacts are
+      # produced exclusively for v* tags so a merge request can be checked
+      # quickly without paying for .deb / tar packaging.
       - name: Package .deb and Linux executable
+        if: github.ref_type == 'tag'
         run: |
           cd build
           cpack -G DEB
           project_version=$(grep '^SPARK_TUI_PROJECT_VERSION:STRING=' CMakeCache.txt | cut -d= -f2)
           name="spark-tui-${project_version}-linux-${{ matrix.arch }}"
           mkdir -p "../$name"
-          cp spark-tui "../$name/"
+          cp spark-tui spark-client "../$name/"
+          cp -a libsparkapp-core.so* "../$name/"
+          # Build-tree rpaths point at the CI workspace; the tarball must resolve
+          # libsparkapp-core.so next to the binaries instead.
+          patchelf --set-rpath '$ORIGIN' "../$name/spark-tui" "../$name/spark-client"
           cp ../README.md ../LICENSE ../docs/config.example.toml "../$name/"
           tar -C .. -czf "spark-tui_${project_version}_linux-${{ matrix.arch }}.tar.gz" "$name"
           sha256sum ./*.deb ./*.tar.gz > "SHA256SUMS-${{ matrix.arch }}"
 
+      - name: Verify Linux tarball
+        if: matrix.arch == 'amd64' && github.ref_type == 'tag'
+        run: |
+          cd build
+          project_version=$(grep '^SPARK_TUI_PROJECT_VERSION:STRING=' CMakeCache.txt | cut -d= -f2)
+          rm -rf /tmp/tarcheck
+          mkdir -p /tmp/tarcheck
+          tar -xzf "spark-tui_${project_version}_linux-amd64.tar.gz" -C /tmp/tarcheck
+          cd /tmp
+          env -u LD_LIBRARY_PATH "/tmp/tarcheck/spark-tui-${project_version}-linux-amd64/spark-tui" --version
+          env -u LD_LIBRARY_PATH "/tmp/tarcheck/spark-tui-${project_version}-linux-amd64/spark-client" --version
+          if readelf -d "/tmp/tarcheck/spark-tui-${project_version}-linux-amd64/spark-tui" | grep -v '\$ORIGIN' | grep -q 'RPATH\|RUNPATH'; then
+            echo "tarball binary still contains a non-\$ORIGIN rpath" >&2
+            exit 1
+          fi
+
       - name: Upload Linux packages
+        if: github.ref_type == 'tag'
         uses: actions/upload-artifact@v7
         with:
           name: spark-tui-linux-${{ matrix.arch }}
@@ -130,6 +161,11 @@ jobs:
           if (-not (Test-Path "$vcpkg/scripts/buildsystems/vcpkg.cmake")) {
             throw "vcpkg toolchain not found under $vcpkg"
           }
+          $version = (Get-Content VERSION -TotalCount 1).Trim()
+          $project = $version.Split('-')[0]
+          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -ne "v$project") {
+            throw "tag $env:GITHUB_REF_NAME does not match VERSION v$project"
+          }
           $args = @(
             '-S', '.', '-B', 'build',
             '-A', '${{ matrix.generator_arch }}',
@@ -138,16 +174,6 @@ jobs:
             '-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded',
             '-DCMAKE_BUILD_TYPE=Release'
           )
-          if ($env:GITHUB_REF_TYPE -eq 'tag') {
-            $raw = $env:GITHUB_REF_NAME.TrimStart('v')
-            $version = ($raw -split '-')[0]
-            $package = $version
-            if ($raw -ne $version) {
-              $package = "$version~$($raw.Substring($version.Length + 1))"
-            }
-            $args += "-DSPARK_TUI_PROJECT_VERSION=$version"
-            $args += "-DSPARK_TUI_PACKAGE_VERSION=$package"
-          }
           cmake @args
 
       - name: Build
@@ -157,6 +183,7 @@ jobs:
         run: ctest --test-dir build -C Release --output-on-failure
 
       - name: Package Windows executable
+        if: github.ref_type == 'tag'
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -173,6 +200,7 @@ jobs:
           "$hash  $(Split-Path $zip -Leaf)" | Out-File -Encoding ascii "build/SHA256SUMS-windows-${{ matrix.arch }}"
 
       - name: Upload Windows package
+        if: github.ref_type == 'tag'
         uses: actions/upload-artifact@v7
         with:
           name: spark-tui-windows-${{ matrix.arch }}
@@ -180,6 +208,46 @@ jobs:
             build/*.zip
             build/SHA256SUMS-windows-${{ matrix.arch }}
           if-no-files-found: error
+
+  gtk:
+    name: gtk-framework
+    # Tag builds compile the GUI inside the linux packaging jobs; this job is
+    # the quick, separate syntax check for branch and pull-request pushes.
+    if: github.ref_type != 'tag'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+
+      - name: Detect GTK frontend
+        id: detect
+        run: |
+          if [ -f src/gtk/main.cpp ] && [ -f src/gtk/application.cpp ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "No GTK frontend sources found, skipping the GUI build."
+          fi
+
+      - name: Install GTK build dependencies
+        if: steps.detect.outputs.present == 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build libssl-dev \
+            libgtk-4-dev libadwaita-1-dev pkg-config
+
+      - name: Configure GTK frontend
+        if: steps.detect.outputs.present == 'true'
+        run: |
+          cmake -S . -B build-gtk -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DSPARK_TUI_BUILD_GTK=ON
+
+      - name: Build GTK frontend
+        if: steps.detect.outputs.present == 'true'
+        run: cmake --build build-gtk --target spark-gui --parallel 4
 
   source:
     name: debian-source
@@ -194,28 +262,28 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends dpkg-dev
 
+      - name: Check version sync
+        run: packaging/sync-version.sh --check
+
       - name: Build Debian source package
+        if: github.ref_type == 'tag'
         run: |
-          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
-            raw="${GITHUB_REF_NAME#v}"
-            if [[ "${raw}" == *-* ]]; then
-              upstream="${raw%%-*}"
-              suffix="${raw#*-}"
-              version="${upstream}~${suffix}-1"
-            else
-              version="${raw}-1"
-            fi
-          else
-            version=$(dpkg-parsechangelog -SVersion)
+          version=$(head -n 1 VERSION | tr -d '[:space:]')
+          project="${version%-*}"
+          if [ "${GITHUB_REF_TYPE}" = "tag" ] && [ "${GITHUB_REF_NAME}" != "v${project}" ]; then
+            echo "tag ${GITHUB_REF_NAME} does not match VERSION v${project}" >&2
+            exit 1
           fi
           packaging/build-source.sh "${version}"
 
       - name: Checksums
+        if: github.ref_type == 'tag'
         run: |
           cd build/source
           sha256sum ./*.dsc ./*.orig.tar.* ./*.debian.tar.* ./*.changes ./*.buildinfo > SHA256SUMS-source
 
       - name: Upload source package
+        if: github.ref_type == 'tag'
         uses: actions/upload-artifact@v7
         with:
           name: spark-tui-source

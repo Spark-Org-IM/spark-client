@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Spark ORG
+GenericName=Spark ORG Client
+Comment=Browse Spark ORG news, contacts, platforms and the forum
+Exec=spark-gui %U
+Icon=spark-tui
+Terminal=false
+Categories=Network;News;InstantMessaging;
+Keywords=spark;news;forum;gui;gtk;org;
+StartupNotify=true

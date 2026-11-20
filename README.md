@@ -64,7 +64,8 @@ v6.1.9。加 `-DSPARK_TUI_USE_SYSTEM_FTXUI=ON` 可以强制使用系统包，避
 运行：
 
 ```bash
-./build/spark-tui
+./build/spark-tui       # 只跑 TUI
+./build/spark-client    # 按会话选择 TUI / GUI（Linux）
 ```
 
 ## 本机开发（Service-Newsite，端口 8096）
@@ -205,6 +206,26 @@ display_name = 'Jianyin Li'
 | `-l`, `--lang` | `SPARK_TUI_LANG` | `zh-cn` / `en-us` |
 | `--config` | `SPARK_TUI_CONFIG` | 配置文件路径 |
 | `-k`, `--insecure` | `SPARK_TUI_INSECURE` | 跳过 TLS 校验 |
+| `--ui` | `SPARK_UI` | 前端：`auto` / `tui` / `gtk`，由 `spark-client` 处理 |
+
+### 启动入口
+
+| 命令 | 所属包 | 行为 |
+| --- | --- | --- |
+| `spark-client` | `sparkapp-core` | 检测会话，`exec` 到 `spark-gui` 或 `spark-tui` |
+| `spark-tui` | `sparkapp-tui` | 只运行终端界面，不做任何 GUI 判断 |
+| `spark-gui` | `sparkapp-gui` | 只运行 GTK 界面，不做任何终端判断 |
+
+`spark-client` 的判定顺序与 `--ui` / `SPARK_UI` 一致：
+
+1. `--ui tui|gtk` 或 `SPARK_UI` 显式指定；
+2. 从 `.desktop` / GIO 启动 → GUI；
+3. SSH 会话 → TUI；
+4. stdin/stdout 是 TTY → TUI；
+5. 有图形会话 → GUI；
+6. 都没有 → 报错并提示安装哪个包。
+
+前端可执行文件优先在 `spark-client` 同目录查找，其次 `PATH`。
 
 ## 快捷键
 
@@ -289,23 +310,28 @@ Flarum 2.x 的置顶 / 锁定 / 隐藏 / 重命名 / 标签通过
 推荐把 **GitHub Releases 当作分发 CDN**，CI 只负责构建、测试和上传产物：
 
 1. 在 GitHub 建一个公开仓库（例如 `Spark-Org-IM/spark-client`）；
-2. 把当前自建 Git 作为开发源，增加 GitHub remote 并推送：
-   ```bash
-   git remote add github git@github.com:Spark-Org-IM/spark-client.git
-   git push github dev-261115
-   ```
-3. `.github/workflows/ci.yml` 会在 push / PR 时自动构建四类产物：
-   - Linux amd64：`.deb` + 独立可执行文件 `.tar.gz`
-   - Linux arm64：`.deb` + 独立可执行文件 `.tar.gz`
-   - Windows amd64 / arm64：`.zip`（静态链接 OpenSSL，单 exe）
-   - Debian 源码包：`.dsc` + `.orig.tar.gz` + `.debian.tar.xz` + `.changes` + `.buildinfo`
+2. 当前本地 remote 约定：
+   - `origin` = GitHub SSH
+   - `gitea` = 自建 Git
 
-   每个任务都会运行单元测试 / 打包检查，并把产物上传为 Actions artifact
-   （保留 90 天）。
+   ```bash
+   git push origin <branch>
+   ```
+3. `.github/workflows/ci.yml` 在 push / PR 时只做**构建和单元测试**，方便合并前
+   快速检查；打包和上传产物只在 `v*` tag 上执行：
+   - Linux amd64 / arm64：`sparkapp-core` + `sparkapp-tui` 两个 `.deb`，以及
+     自包含运行包 `.tar.gz`；
+   - Windows amd64 / arm64：`.zip`（静态链接 OpenSSL，单 exe）；
+   - Debian 源码包：`.dsc` + `.orig.tar.gz` + `.debian.tar.xz` + `.changes` + `.buildinfo`；
+   - GTK 前端 `spark-gui` 在独立的 `gtk-framework` 任务里做分支 / PR 的快速
+     构建检查（仅当 `src/gtk/` 存在）；tag 构建时由 Linux 任务一并编译并生成
+     `sparkapp-gui` 的 `.deb`，但它不会打进“解压即用”的 Linux tar 包。
+
+   tag 构建会把上述产物上传为 Actions artifact（保留 90 天）。
 4. 发布版本只需要推 tag：
    ```bash
-   git tag v0.2.0
-   git push github v0.2.0
+   git tag v0.2.2
+   git push origin v0.2.2
    ```
    同一个 workflow 会创建 GitHub Release，并附上所有平台包和统一的
    `SHA256SUMS`。
@@ -313,33 +339,58 @@ Flarum 2.x 的置顶 / 锁定 / 隐藏 / 重命名 / 标签通过
    ```bash
    sha256sum -c SHA256SUMS
 
-   # Debian / Ubuntu
-   sudo apt install ./spark-tui_0.2.0-1_amd64.deb
+   # Debian / Ubuntu：三个包互相独立，按需安装
+   #   - core：共享库 + spark-client，不依赖 GTK
+   #   - tui ：终端前端，不依赖 GTK
+   #   - gui ：GTK 前端，依赖 core + libgtk-4-1 + libadwaita-1-0
+   sudo apt install ./sparkapp-core_0.2.2-1_amd64.deb \
+                    ./sparkapp-tui_0.2.2-1_amd64.deb
+   sudo apt install ./sparkapp-core_0.2.2-1_amd64.deb \
+                    ./sparkapp-gui_0.2.2-1_amd64.deb
 
-   # 其它 Linux：解压后直接运行
-   tar -xzf spark-tui_0.2.0_linux-amd64.tar.gz
-   ./spark-tui-0.2.0-linux-amd64/spark-tui
+   # 统一入口：按会话自动启动 spark-gui 或 spark-tui
+   spark-client
+
+   # 其它 Linux：解压后直接运行（包内已带 libsparkapp-core.so）
+   tar -xzf spark-tui_0.2.2_linux-amd64.tar.gz
+   ./spark-tui-0.2.2-linux-amd64/spark-tui
+   ./spark-tui-0.2.2-linux-amd64/spark-client   # 统一入口
    ```
-   Windows 解压 `spark-tui_0.2.0_windows-amd64.zip` 或
-   `spark-tui_0.2.0_windows-arm64.zip` 后运行 `spark-tui.exe`。
+   Windows 解压 `spark-tui_0.2.2_windows-amd64.zip` 或
+   `spark-tui_0.2.2_windows-arm64.zip` 后运行 `spark-tui.exe`。
 
    所有发布文件还会打成一个总包
-   `spark-tui_0.2.0_all.tar.gz`，解压后是 `spark-tui-0.2.0/` 文件夹，
+   `spark-tui_0.2.2_all.tar.gz`，解压后是 `spark-tui-0.2.2/` 文件夹，
    包含 `.deb`、Windows zip、Linux tar、源码包、`.changes`、`.buildinfo`
    和内部 `SHA256SUMS`，可以直接作为手动导入 deb 源的目录。
 
+   二进制包拆分为：
+
+   - `sparkapp-core`：共享 `libsparkapp-core.so`、配置、API 逻辑、统一入口
+     `spark-client`，以及两个前端共用的桌面图标；不依赖 GTK / FTXUI；
+   - `sparkapp-tui`：`spark-tui` 可执行文件，依赖 `sparkapp-core`，不依赖 GTK；
+   - `sparkapp-gui`：`spark-gui` 可执行文件和桌面项，依赖 `sparkapp-core`、
+     `libgtk-4-1`、`libadwaita-1-0`，不依赖 FTXUI。
+
+   三个包共用同一个配置目录，可以只装 TUI、只装 GUI，或两个前端都装。
+   默认 `.desktop` 也可以写 `spark-client`，由统一入口按会话选择前端。
+
+   `spark-client` 只负责选择前端，不做界面：图形会话启动 `spark-gui`，
+   终端 / SSH 启动 `spark-tui`；如果只装了 `sparkapp-core`，它会直接提示
+   缺少哪个前端（图形会话下用 zenity/kdialog 弹窗），不会静默失败。
+
    Debian 源码包（`.dsc` / `.orig.tar.*` / `.debian.tar.*` / `.changes` /
-   `.buildinfo` 都在同一个 artifact 里，文件名带 `0.2.0-1` 版本号）：
+   `.buildinfo` 都在同一个 artifact 里，文件名带 `0.2.2-1` 版本号）：
    ```bash
-   dpkg-source -x spark-tui_0.2.0-1.dsc
-   cd spark-tui-0.2.0
+   dpkg-source -x spark-tui_0.2.2-1.dsc
+   cd spark-tui-0.2.2
    dpkg-buildpackage -us -uc
    ```
 
    CI 生成源码包时使用 `dpkg-buildpackage -S -us -uc -sa`；`-sa` 会把
    `orig.tar.*` 一并写进 `.changes`。
 
-0.x 阶段不使用 beta 后缀：重要测试节点直接打 `v0.2.0`，日常测试不推
+0.x 阶段不使用 beta 后缀：重要测试节点直接打 `v0.2.2`，日常测试不推
 tag，直接使用 Actions artifact 即可。
 
 GitHub Actions 对公开仓库的标准 Linux runner **不计分钟数**；私有仓库
@@ -364,7 +415,36 @@ Gitea 忽略 `.github/workflows`，避免在没有 runner 时出现
 > 用 `reprepro` / `aptly` 生成的静态 APT 仓库；当前阶段用 Releases +
 > 手动安装 `.deb` 更简单，也不需要维护服务器。
 
+## 版本号
+
+根目录的 `VERSION` 是唯一版本源，格式为：
+
+```text
+上游版本-Debian修订号
+0.2.2-1
+```
+
+CMake 从这里生成：
+
+- `SPARK_TUI_PROJECT_VERSION`：`0.2.2`
+- `SPARK_TUI_PACKAGE_VERSION`：`0.2.2-1`
+- 程序里的 `SPARK_TUI_VERSION`、`spark-tui --version`
+- `.deb` 文件名、Linux tar / Windows zip 文件名
+- Debian 源码包版本
+
+修改版本时只改 `VERSION`，然后同步派生文件：
+
+```bash
+packaging/sync-version.sh
+```
+
+它会更新 `debian/changelog` 和 `vcpkg.json`。CI 会运行
+`packaging/sync-version.sh --check`，并校验 tag 必须等于
+`v${VERSION%-*}`，例如 `VERSION=0.2.2-1` 只能打 `v0.2.2`。
+
 ## 打包 .deb
+
+只装终端前端（不需要 GTK 开发包）：
 
 ```bash
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
@@ -372,24 +452,38 @@ cmake --build build
 cd build && cpack -G DEB
 ```
 
-产物：`build/spark-tui_<version>_<arch>.deb`。
+产物：
 
-默认用 `dpkg-shlibdeps` 自动计算运行时依赖（需要系统已安装对应的
-`libftxui-*`）。如果 FTXUI 来自一个私有/解压出来的前缀，可以关闭它并
-使用显式依赖：
+- `sparkapp-core_<version>_<arch>.deb`
+- `sparkapp-tui_<version>_<arch>.deb`
 
-```bash
-cmake -S . -B build -DSPARK_TUI_DEB_SHLIBDEPS=OFF
-```
-
-安装：
+同时生成 GTK 前端包（需要 `libgtk-4-dev`、`libadwaita-1-dev`、`pkg-config`）：
 
 ```bash
-sudo dpkg -i build/spark-tui_*.deb
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+  -DSPARK_TUI_BUILD_GTK=ON
+cmake --build build
+cd build && cpack -G DEB
 ```
 
-使用系统 FTXUI 构建时，包会依赖 `libftxui-*`；使用 FetchContent
-构建时，FTXUI 会静态编入可执行文件，运行时只依赖 OpenSSL / libstdc++。
+产物额外包含 `sparkapp-gui_<version>_<arch>.deb`，依赖 `sparkapp-core`、
+`libgtk-4-1` 和 `libadwaita-1-0`。
+
+安装（三个包互相独立）：
+
+```bash
+# 终端
+sudo apt install ./sparkapp-core_*.deb ./sparkapp-tui_*.deb
+# 图形
+sudo apt install ./sparkapp-core_*.deb ./sparkapp-gui_*.deb
+```
+
+依赖计算：
+
+- `sparkapp-core` 用 `dpkg-shlibdeps` 自动计算；
+- `sparkapp-tui` / `sparkapp-gui` 使用显式依赖（core + 各自的 UI 库），
+  这样 TUI 不会带进 GTK、GUI 不会带进 FTXUI；
+- 需要完全手写依赖时可以加 `-DSPARK_TUI_DEB_SHLIBDEPS=OFF`。
 
 ## 目录结构
 
@@ -412,9 +506,12 @@ sudo dpkg -i build/spark-tui_*.deb
 ```
 
 `spark_core`（`api/`、`forum/`、`config.*`、`service_source.*`、`util.*`、
-`ui/render_detail.*`）不依赖 FTXUI，是可以被其它前端复用的业务层。当前的
-TUI 只是其中一种前端；以后开发 GTK GUI 时直接链接 `spark_core`，不要把
-API / 配置 / 服务源逻辑复制到界面层。
+`worker.*`、`ui/render_detail.*`）不依赖 FTXUI，是可以被其它前端复用的
+业务层。TUI 只是其中一种前端；GTK 前端 `spark-gui` 同样直接链接
+`spark_core`，不要把 API / 配置 / 服务源逻辑复制到界面层。
+
+GTK / GNOME 前端设计、GUI/TUI 启动检测、libadwaita 主题和打包方式见
+[`dev-docs/GTK.md`](dev-docs/GTK.md)。
 
 ## API 文档
 

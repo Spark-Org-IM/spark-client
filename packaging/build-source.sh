@@ -4,7 +4,7 @@ set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root"
 
-version="${1:-$(dpkg-parsechangelog -SVersion)}"
+version="${1:-$(head -n 1 "$root/VERSION" | tr -d '[:space:]')}"
 upstream="${version%-*}"
 out="${2:-$root/build/source}"
 ref="${3:-HEAD}"
@@ -27,7 +27,14 @@ rm -rf "$stage/debian"
 tar -C "$tmp" -czf "$tmp/spark-tui_${upstream}.orig.tar.gz" \
   "spark-tui-${upstream}"
 
+# Copy packaging files but never debhelper build artifacts, which would end up
+# in the .debian.tar.* and make dpkg-source reject the diff.
 cp -a "$root/debian" "$stage/debian"
+rm -rf "$stage/debian/.debhelper" "$stage/debian/tmp" \
+       "$stage/debian/files" "$stage/debian/debhelper-build-stamp" \
+       "$stage/debian/sparkapp-core" "$stage/debian/sparkapp-tui" \
+       "$stage/debian/sparkapp-gui" \
+       "$stage"/debian/*.substvars "$stage"/debian/*.debhelper.log
 sed -i "1s/^spark-tui ([^)]*)/spark-tui (${version})/" "$stage/debian/changelog"
 
 (

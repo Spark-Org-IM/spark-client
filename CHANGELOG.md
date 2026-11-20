@@ -2,13 +2,34 @@
 
 ## Unreleased
 
+### 新增
+
+- 新增 GTK4 / libadwaita 前端 `spark-gui`，并作为独立 `sparkapp-gui` 包发布：
+  - 窗口级 `AdwNavigationView` + 侧边栏 + 内容栈，详情页作为新页面推入；
+  - 主页置顶新闻、新闻 / 联系 / 平台列表（分页）、论坛讨论列表、账号页；
+  - 详情页异步加载：新闻、联系人、平台、论坛主题、账号信息，支持导入 PGP 公钥；
+  - 跟随 GNOME 深色模式、强调色和高对比度，不覆盖系统主题；
+  - 网络请求在 `spark::Worker` 线程池执行，结果经 `g_idle_add` 回到 GTK 主循环；
+  - 线程池 `Worker` 从 TUI 移入 `spark_core`，TUI 与 GTK 共用；
+  - GTK 登录界面尚未接入，登录仍通过 `spark-tui`，两者共享同一份配置。
+
 ### 构建
 
+- 版本号统一由根目录 `VERSION` 控制，`debian/changelog` 和 `vcpkg.json` 由
+  `packaging/sync-version.sh` 同步；
 - GitHub Actions 多平台矩阵：Linux amd64 / arm64 生成 `.deb` 和独立可执行文件，
   Windows amd64 / arm64 生成单 exe 的 `.zip`；
 - Debian 源码包：`.dsc` + `.orig.tar.gz` + `.debian.tar.xz` + `.changes` + `.buildinfo`；
+- 二进制包拆分为 `sparkapp-core` / `sparkapp-tui` / `sparkapp-gui`，三个包可独立安装；
+  TUI 不依赖 GTK，GUI 依赖 `sparkapp-core` + GTK4 / libadwaita，不依赖 FTXUI；
+- `sparkapp-core` 新增统一入口 `spark-client`，按会话启动 TUI 或 GTK 前端；
+- Linux 独立运行包内含 `libsparkapp-core.so`，rpath 为 `$ORIGIN`，解压即可运行；
 - 所有发布文件汇总为 `spark-tui_<version>_all.tar.gz` 总包；
-- push / PR 构建并上传 artifact，`v*` tag 自动汇总发布 Release。
+- push / PR 只构建并运行测试，方便合并前检查；`v*` tag 才打包、上传
+  artifact 并汇总发布 Release；
+- GTK 前端在独立的 `gtk-framework` 任务中做分支 / PR 构建检查；tag 时由
+  Linux 任务生成 `sparkapp-gui` 的 `.deb`，但“解压即用”的 Linux tar 仍只带
+  core + TUI。
 
 ## 0.2.0
 

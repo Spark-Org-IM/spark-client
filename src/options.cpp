@@ -63,6 +63,10 @@ Options ParseOptions(int argc, char** argv) {
       opts.configPath = next("--config");
     } else if (arg.rfind("--config=", 0) == 0) {
       opts.configPath = arg.substr(std::string("--config=").size());
+    } else if (arg == "--ui") {
+      opts.ui = next("--ui");
+    } else if (arg.rfind("--ui=", 0) == 0) {
+      opts.ui = arg.substr(std::string("--ui=").size());
     } else if (arg == "-k" || arg == "--insecure") {
       opts.insecure = true;
     } else if (arg == "--no-sync") {
@@ -78,6 +82,7 @@ Options ParseOptions(int argc, char** argv) {
   if (opts.forumUrl.empty()) opts.forumUrl = Env("SPARK_TUI_FORUM_URL");
   if (opts.language.empty()) opts.language = Env("SPARK_TUI_LANG");
   if (opts.configPath.empty()) opts.configPath = Env("SPARK_TUI_CONFIG");
+  if (opts.ui.empty()) opts.ui = Env("SPARK_UI");
   if (!opts.insecure) opts.insecure = EnvBool("SPARK_TUI_INSECURE");
   if (!opts.noSync) opts.noSync = EnvBool("SPARK_TUI_NO_SYNC");
 
@@ -103,12 +108,13 @@ std::string Usage() {
   -l, --lang LANG        语言: system | zh-cn | en-us
   -k, --insecure         跳过 TLS 证书校验（自签名开发环境）
       --config PATH      配置文件（默认: ~/.config/spark-tui/config.toml）
+      --ui MODE          前端: auto | tui | gtk（默认 auto）
   -h, --help             显示帮助
   -v, --version          显示版本
 
 环境变量:
   SPARK_TUI_BASE_URL, SPARK_TUI_SYNC_URL, SPARK_TUI_STATUS_URL,
-  SPARK_TUI_FORUM_URL, SPARK_TUI_LANG, SPARK_TUI_CONFIG,
+  SPARK_TUI_FORUM_URL, SPARK_TUI_LANG, SPARK_TUI_CONFIG, SPARK_UI,
   SPARK_TUI_INSECURE, SPARK_TUI_NO_SYNC
 
 本机开发:

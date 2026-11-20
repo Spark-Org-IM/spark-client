@@ -478,7 +478,12 @@ cd build && cpack -G DEB
 sudo apt install ./sparkapp-core_*.deb ./sparkapp-tui_*.deb
 # 图形
 sudo apt install ./sparkapp-core_*.deb ./sparkapp-gui_*.deb
+# 可选插件（不装不影响 TUI / GUI）
+sudo apt install ./sparkapp-plugin-news_*.deb
 ```
+
+插件默认不构建。需要示例插件时在配置阶段加 `-DSPARK_TUI_BUILD_PLUGINS=ON`，
+它会生成独立的 `sparkapp-plugin-news` 包，只依赖同版本的 `sparkapp-core`。
 
 依赖计算：
 
@@ -517,8 +522,8 @@ GTK / GNOME 前端设计、GUI/TUI 启动检测、libadwaita 主题和打包方�
 
 可选插件（新闻管理、论坛管理等）以 `sparkapp-plugin-*` 独立包安装，运行时
 由 `spark_core` 的 C ABI 动态加载；前端包不依赖任何插件。TUI 中按 `P` 打开
-插件动作列表。插件接口、动作模型和安全边界见
-[`dev-docs/PLUGINS.md`](dev-docs/PLUGINS.md)。
+插件动作列表；GTK 在至少一个动作可用时显示“插件”页。插件接口、动作模型和
+安全边界见 [`dev-docs/PLUGINS.md`](dev-docs/PLUGINS.md)。
 
 ## API 文档
 

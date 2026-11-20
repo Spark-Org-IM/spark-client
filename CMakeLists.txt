@@ -287,6 +287,11 @@ set(CPACK_COMPONENTS_ALL ${_spark_tui_components})
 set(CPACK_DEBIAN_CORE_PACKAGE_NAME "sparkapp-core")
 set(CPACK_DEBIAN_TUI_PACKAGE_NAME  "sparkapp-tui")
 set(CPACK_DEBIAN_GUI_PACKAGE_NAME  "sparkapp-gui")
+# All binary packages come from the spark-client source package; reprepro
+# rejects a binary whose Source does not match the .dsc.
+set(CPACK_DEBIAN_CORE_PACKAGE_SOURCE "spark-client")
+set(CPACK_DEBIAN_TUI_PACKAGE_SOURCE  "spark-client")
+set(CPACK_DEBIAN_GUI_PACKAGE_SOURCE  "spark-client")
 
 if(SPARK_TUI_DEB_SHLIBDEPS)
   set(CPACK_DEBIAN_CORE_PACKAGE_SHLIBDEPS ON)

@@ -132,6 +132,7 @@ endif()
 # ---------------------------------------------------------------------------
 set(SPARK_CORE_SOURCES
   src/util.cpp
+  src/worker.cpp
   src/i18n.cpp
   src/config.cpp
   src/options.cpp
@@ -168,7 +169,6 @@ endif()
 # ---------------------------------------------------------------------------
 add_executable(spark-tui
   src/main.cpp
-  src/ui/worker.cpp
   src/ui/app.cpp
 )
 target_link_libraries(spark-tui PRIVATE
@@ -207,6 +207,12 @@ if(SPARK_TUI_BUILD_GTK)
   add_executable(spark-gui
     src/gtk/main.cpp
     src/gtk/application.cpp
+    src/gtk/widgets.cpp
+    src/gtk/detail.cpp
+    src/gtk/pages/home_page.cpp
+    src/gtk/pages/list_page.cpp
+    src/gtk/pages/forum_page.cpp
+    src/gtk/pages/me_page.cpp
   )
   target_link_libraries(spark-gui PRIVATE
     spark_core

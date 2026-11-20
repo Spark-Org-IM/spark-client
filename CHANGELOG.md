@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### 新增
+
+- 新增 GTK4 / libadwaita 前端 `spark-gui`（只读阶段，打包稍后接入）：
+  - 窗口级 `AdwNavigationView` + 侧边栏 + 内容栈，详情页作为新页面推入；
+  - 主页置顶新闻、新闻 / 联系 / 平台列表（分页）、论坛讨论列表、账号页；
+  - 详情页异步加载：新闻、联系人、平台、论坛主题、账号信息，支持导入 PGP 公钥；
+  - 跟随 GNOME 深色模式、强调色和高对比度，不覆盖系统主题；
+  - 网络请求在 `spark::Worker` 线程池执行，结果经 `g_idle_add` 回到 GTK 主循环；
+  - 线程池 `Worker` 从 TUI 移入 `spark_core`，TUI 与 GTK 共用；
+  - GTK 登录界面尚未接入，登录仍通过 `spark-tui`，两者共享同一份配置。
+
 ### 构建
 
 - 版本号统一由根目录 `VERSION` 控制，`debian/changelog` 和 `vcpkg.json` 由

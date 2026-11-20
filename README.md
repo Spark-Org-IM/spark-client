@@ -214,7 +214,7 @@ display_name = 'Jianyin Li'
 | --- | --- | --- |
 | `spark-client` | `sparkapp-core` | 检测会话，`exec` 到 `spark-gui` 或 `spark-tui` |
 | `spark-tui` | `sparkapp-tui` | 只运行终端界面，不做任何 GUI 判断 |
-| `spark-gui` | `sparkapp-gui`（后续） | 只运行 GTK 界面，不做任何终端判断 |
+| `spark-gui` | `sparkapp-gui`（源码已接入，打包后续） | 只运行 GTK 界面，不做任何终端判断 |
 
 `spark-client` 的判定顺序与 `--ui` / `SPARK_UI` 一致：
 
@@ -361,7 +361,8 @@ Flarum 2.x 的置顶 / 锁定 / 隐藏 / 重命名 / 标签通过
    - `sparkapp-core`：共享 `libsparkapp-core.so`、配置、API 逻辑，以及统一
      入口 `spark-client`；
    - `sparkapp-tui`：`spark-tui` 可执行文件，依赖 `sparkapp-core`，不依赖 GTK；
-   - `sparkapp-gui`：GTK 前端接入后新增，依赖 `sparkapp-core` + GTK/libadwaita。
+   - `sparkapp-gui`：GTK 前端打包完成后新增，依赖 `sparkapp-core` + GTK/libadwaita
+     （源码已可构建，当前只读，尚未发布）。
 
    `spark-client` 只负责选择前端，不做界面：图形会话启动 `spark-gui`，
    终端 / SSH 启动 `spark-tui`；如果只装了 `sparkapp-core`，它会直接提示
@@ -478,9 +479,9 @@ sudo dpkg -i build/spark-tui_*.deb
 ```
 
 `spark_core`（`api/`、`forum/`、`config.*`、`service_source.*`、`util.*`、
-`ui/render_detail.*`）不依赖 FTXUI，是可以被其它前端复用的业务层。当前的
-TUI 只是其中一种前端；以后开发 GTK GUI 时直接链接 `spark_core`，不要把
-API / 配置 / 服务源逻辑复制到界面层。
+`worker.*`、`ui/render_detail.*`）不依赖 FTXUI，是可以被其它前端复用的
+业务层。TUI 只是其中一种前端；GTK 前端 `spark-gui` 同样直接链接
+`spark_core`，不要把 API / 配置 / 服务源逻辑复制到界面层。
 
 GTK / GNOME 前端设计、GUI/TUI 启动检测、libadwaita 主题和打包方式见
 [`dev-docs/GTK.md`](dev-docs/GTK.md)。

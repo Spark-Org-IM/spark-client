@@ -9,7 +9,7 @@
 - `spark_core`：配置、服务源、Spark API、Flarum API、渲染无关的模型，**不依赖 FTXUI**；
 - `spark-client`：随 `sparkapp-core` 安装的入口，检测会话后 `exec` 前端；
 - `spark-tui`：FTXUI 终端前端，永远是 TUI；
-- 未来的 `spark-gui`：GTK4 + libadwaita 前端，永远是 GUI。
+- `spark-gui`：GTK4 + libadwaita 前端，永远是 GUI，当前处于只读框架阶段。
 
 ```text
 spark_core
@@ -22,7 +22,7 @@ spark_core
 服务源确认等界面逻辑如果还需要复用，应先把状态机提取到 `spark_core` 或
 独立的 controller 层。
 
-## 2. 推荐目录结构
+## 2. 目录结构
 
 ```text
 src/
@@ -30,6 +30,7 @@ src/
 ├── forum/               # Flarum API
 ├── config.*             # TOML 配置
 ├── service_source.*     # 服务源同步 / 令牌探测
+├── worker.*             # 线程池（TUI 与 GTK 共用，已移入 spark_core）
 ├── platform/
 │   ├── session.h        # 是否终端 / 是否有图形会话
 │   └── session.cpp
@@ -37,13 +38,26 @@ src/
 │   └── main.cpp         # spark-client：会话判断 + exec 前端
 ├── gtk/
 │   ├── main.cpp         # AdwApplication（纯 GUI，不做判断）
-│   ├── application.*    # 应用生命周期、DBus 激活
-│   ├── window.*         # AdwApplicationWindow
-│   ├── pages/           # 主页 / 新闻 / 论坛 / 我的
-│   ├── async.*          # 后台任务 -> GTK 主循环
-│   └── theme.*          # libadwaita 样式与 CSS
+│   ├── application.*    # 窗口、侧边栏、导航栈、设置 / 关于
+│   ├── page.h           # Page 接口 + PageContext + 主线程回调
+│   ├── async.h          # PostToMainThread
+│   ├── widgets.*        # 通用行 / 列表 / 状态页 / 链接按钮
+│   ├── detail.*         # 新闻 / 联系 / 平台 / 论坛 / 账号详情
+│   └── pages/
+│       ├── home_page.*  # 主页置顶新闻
+│       ├── list_page.*  # 新闻 / 联系 / 平台通用列表
+│       ├── forum_page.* # Flarum 讨论列表
+│       └── me_page.*    # 账号信息
 └── ui/                  # 现有 FTXUI 前端，保持不动
 ```
+
+页面不直接持有网络线程：所有请求都通过 `spark::Worker` 提交，结果用
+`PostToMainThread()` 回到 GTK 主循环。`Application` 在析构时先停止并
+`join` 线程池，再销毁页面，因此页面可以安全地捕获 `this`。
+
+详情页使用窗口级 `AdwNavigationView`：列表行被点击后立即 `push` 一个
+带返回按钮的页面，再用异步结果填充；如果用户在请求完成前返回，弱指针
+会让迟到的结果自动失效。
 
 二进制名直接分开：
 
@@ -68,9 +82,12 @@ if(SPARK_TUI_BUILD_GTK)
   add_executable(spark-gui
     src/gtk/main.cpp
     src/gtk/application.cpp
-    src/gtk/window.cpp
-    src/gtk/async.cpp
-    src/platform/session.cpp
+    src/gtk/widgets.cpp
+    src/gtk/detail.cpp
+    src/gtk/pages/home_page.cpp
+    src/gtk/pages/list_page.cpp
+    src/gtk/pages/forum_page.cpp
+    src/gtk/pages/me_page.cpp
   )
   target_link_libraries(spark-gui PRIVATE
     spark_core
@@ -138,13 +155,18 @@ int main(int argc, char** argv) {
 
 - `AdwApplicationWindow`：主窗口；
 - `AdwHeaderBar`：标题栏，不使用自绘标题栏；
-- `AdwNavigationSplitView`：左侧列表 + 右侧详情（新闻、论坛、搜索都适用）；
-- `AdwViewSwitcher` / `AdwViewStack`：主页、新闻、联系、平台、论坛、我的；
+- `AdwNavigationSplitView`：侧边栏 + 内容栈，窄窗口自动折叠；
+- `AdwNavigationView`：窗口级导航，详情页 `push` 成新页面并自动带返回按钮；
+- `GtkStack`：主页、新闻、联系、平台、论坛、我的之间切换；
 - `AdwPreferencesWindow`：设置；
 - `AdwStatusPage`：空状态、加载失败、未登录；
 - `AdwToastOverlay`：短提示；
-- `AdwAboutWindow`：关于页；
+- `AdwAboutDialog`（libadwaita 1.5+；旧版本回退到 `AdwAboutWindow`）：关于页；
 - `GNotification`：后台同步、回复成功等通知。
+
+`AdwNavigationView`、`AdwToolbarView`、`AdwNavigationSplitView` 需要
+libadwaita 1.4+；`AdwSwitchRow` 需要 1.4+；关于页在 1.5+ 使用
+`AdwAboutDialog`。
 
 窗口和列表要做窄窗口适配：`AdwNavigationSplitView` 在窄宽度会自动折叠，
 不要写死三栏布局。
@@ -325,20 +347,22 @@ SSH、桌面启动器下都能落到正确的前端；只有需要强制 TUI 时
 ## 7. 后台任务与线程模型
 
 `spark_core` 的 HTTP 请求是阻塞的，GTK 主循环绝不能直接调用同步网络请求。
-推荐：
+当前实现：
 
 ```text
-GTK 主线程
-   │ 提交任务
-   ▼
-std::jthread / GTask
-   │ 阻塞调用 spark_core
-   ▼
-结果通过 g_idle_add / Glib::Dispatcher 回到主线程
-   │
+GTK 主线程                              spark::Worker（spark_core）
+   │ Submit(job)                            │
+   ├───────────────────────────────────────▶│ 阻塞调用 ApiClient / ForumClient
+   │                                        │ PostToMainThread(fn)
+   │◀───────────────────────────────────────┤ (g_idle_add_full)
    ▼
 更新 GTK 控件
 ```
+
+`spark::Worker` 是 TUI 与 GTK 共用的固定大小线程池：`Submit()` 投递任务，
+`Post()` / `PostToMainThread()` 把结果排回主循环。`Application` 持有线程池，
+析构时先 `Stop()`（停止并 `join`）再销毁页面，所以页面可以安全地在任务里
+捕获 `this`。
 
 原则：
 
@@ -495,16 +519,17 @@ xvfb-run -a ./build/spark-gui
 
 ## 11. 分阶段实施建议
 
-1. **抽核心**：把 `SourceReview` 等 UI 状态机从 `src/ui/app.cpp` 提取到
-   `spark_core`，TUI 行为不变；
-2. **最小 GUI**：`spark-gui` 只做只读主页 / 新闻 / 论坛列表，验证
-   GTK4 + libadwaita + 主题；
-3. **登录与详情**：复用 `ApiClient` / `ForumClient`，完成登录、详情、
-   搜索、分页；
-4. **管理功能**：新闻管理、论坛管理、回复、发主题、API 工具；
-5. **打包**：拆 `sparkapp-core` / `sparkapp-tui` / `sparkapp-gui` 二进制包，补 desktop、
-   metainfo、图标和 CI；
-6. **UI 模式检测**：最后加 `spark` 启动器或 `--ui=auto`，不要在最小 GUI
-   阶段就把启动逻辑做复杂。
+1. **抽核心**（已完成）：共享库 `spark_core`、`spark-client` 分发入口、
+   二进制包拆分；
+2. **最小 GUI**（已完成）：只读主页、新闻 / 联系 / 平台列表、论坛列表、
+   账号页，验证 GTK4 + libadwaita + 系统主题；
+3. **详情页**（已完成）：`AdwNavigationView` 推入详情、异步加载、弱指针丢弃
+   迟到结果、PGP 导入；
+4. **登录**（下一步）：设备码登录、论坛账号登录、令牌刷新，写操作前的
+   权限检查；
+5. **管理功能**：新闻管理、论坛管理、回复、发主题、API 工具；
+6. **打包**：拆 `sparkapp-core` / `sparkapp-tui` / `sparkapp-gui` 二进制包，补
+   desktop、metainfo、图标和 CI；
+7. **搜索与偏好**：搜索页，语言 / 服务源设置从设置窗口下沉到页面。
 
 这样 GTK 前端不会反向依赖 FTXUI，TUI 也不会因为 GUI 的加入而变重。

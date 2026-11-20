@@ -79,9 +79,17 @@ int main(int argc, char** argv) {
 
   AdwApplication* app = adw_application_new("org.sparkorg.Spark",
                                             G_APPLICATION_DEFAULT_FLAGS);
-  spark::gtk::Application application(app, std::move(config));
-  g_signal_connect(app, "activate", G_CALLBACK(OnActivate), &application);
-  const int status = g_application_run(G_APPLICATION(app), argc, argv);
+  int status = 0;
+  {
+    // The Application owns the worker pool and every page. Destroy it before
+    // dropping the GApplication so widgets are torn down in a known order.
+    spark::gtk::Application application(app, std::move(config));
+    g_signal_connect(app, "activate", G_CALLBACK(OnActivate), &application);
+    // Our options are already applied above; GTK would reject them as
+    // unknown, so hand the application only the program name.
+    status = g_application_run(G_APPLICATION(app), 1, argv);
+    g_signal_handlers_disconnect_by_data(app, &application);
+  }
   g_object_unref(app);
   return status;
 }

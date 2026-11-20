@@ -12,6 +12,10 @@
 #include "i18n.h"
 #include "worker.h"
 
+namespace spark {
+class PluginHost;
+}
+
 namespace spark::gtk {
 
 using ToastFn = std::function<void(const std::string& message)>;
@@ -19,6 +23,8 @@ using ToastFn = std::function<void(const std::string& message)>;
 // takes ownership of `content`.
 using PushDetailFn =
     std::function<void(const std::string& title, GtkWidget* content)>;
+// Refreshes the pages affected by a plugin action ("news", "forum", "me").
+using RefreshFn = std::function<void(const std::string& target)>;
 
 // Everything a page needs to talk to the shared core and to the window. The
 // objects pointed to are owned by Application and outlive every page.
@@ -27,9 +33,11 @@ struct PageContext {
   ForumClient* forum = nullptr;
   Config* config = nullptr;
   Worker* worker = nullptr;
+  PluginHost* plugins = nullptr;
   std::string lang = "zh-cn";
   ToastFn toast;
   PushDetailFn push_detail;
+  RefreshFn refresh;
 };
 
 inline std::string UiLanguage(const Config& config) {

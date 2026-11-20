@@ -12,6 +12,7 @@
 #include "config.h"
 #include "forum/client.h"
 #include "gtk/page.h"
+#include "plugin/host.h"
 #include "worker.h"
 
 namespace spark::gtk {
@@ -59,6 +60,7 @@ class Application {
   Config config_;
   ApiClient api_;
   ForumClient forum_;
+  PluginHost plugins_;
   std::vector<std::unique_ptr<Page>> pages_;
   std::unique_ptr<Worker> worker_;
   std::atomic<bool> running_{true};

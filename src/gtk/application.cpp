@@ -10,6 +10,7 @@
 #include "gtk/pages/home_page.h"
 #include "gtk/pages/list_page.h"
 #include "gtk/pages/me_page.h"
+#include "gtk/pages/plugins_page.h"
 #include "gtk/widgets.h"
 #include "i18n.h"
 
@@ -36,6 +37,7 @@ const char* IconFor(const std::string& id) {
   if (id == "platform") return "network-workgroup-symbolic";
   if (id == "forum") return "chat-message-new-symbolic";
   if (id == "me") return "avatar-default-symbolic";
+  if (id == "plugins") return "application-x-addon-symbolic";
   return "application-x-executable-symbolic";
 }
 
@@ -74,7 +76,9 @@ Application::Application(AdwApplication* app, Config config)
       config_(std::move(config)),
       api_(config_.EffectiveMain(), config_.insecure, config_.token.plaintext),
       forum_(config_.EffectiveForum(), config_.insecure,
-             config_.forum.token) {
+             config_.forum.token),
+      plugins_(&api_, &forum_, &config_) {
+  plugins_.LoadAll();
   worker_ = std::make_unique<Worker>([this] {
     if (!running_.load()) return;
     PostToMainThread([this] {
@@ -99,10 +103,19 @@ PageContext Application::MakeContext() {
   ctx.forum = &forum_;
   ctx.config = &config_;
   ctx.worker = worker_.get();
+  ctx.plugins = &plugins_;
   ctx.lang = UiLanguage(config_);
   ctx.toast = [this](const std::string& message) { Toast(message); };
   ctx.push_detail = [this](const std::string& title, GtkWidget* content) {
     PushDetail(title, content);
+  };
+  ctx.refresh = [this](const std::string& target) {
+    for (const auto& page : pages_) {
+      const std::string id = page->Id();
+      if (id == target || (target == "news" && id == "home")) {
+        page->Refresh();
+      }
+    }
   };
   return ctx;
 }
@@ -120,6 +133,9 @@ void Application::BuildPages() {
       "network-workgroup-symbolic", ctx));
   pages_.push_back(std::make_unique<ForumPage>(ctx));
   pages_.push_back(std::make_unique<MePage>(ctx));
+  if (HasVisiblePluginActions(ctx)) {
+    pages_.push_back(std::make_unique<PluginsPage>(ctx));
+  }
 }
 
 void Application::BuildWindow() {

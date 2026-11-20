@@ -216,6 +216,7 @@ if(SPARK_TUI_BUILD_GTK)
     src/gtk/pages/list_page.cpp
     src/gtk/pages/forum_page.cpp
     src/gtk/pages/me_page.cpp
+    src/gtk/pages/plugins_page.cpp
   )
   target_link_libraries(spark-gui PRIVATE
     spark_core

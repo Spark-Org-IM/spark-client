@@ -4417,18 +4417,7 @@ void App::RefreshVisiblePluginActions() {
 }
 
 bool App::PluginActionAllowed(const PluginAction& action) const {
-  if (action.scopes.empty() || cfg_.token.scopes.empty()) return true;
-  if (std::find(cfg_.token.scopes.begin(), cfg_.token.scopes.end(), "*") !=
-      cfg_.token.scopes.end()) {
-    return true;
-  }
-  for (const std::string& scope : action.scopes) {
-    if (std::find(cfg_.token.scopes.begin(), cfg_.token.scopes.end(), scope) ==
-        cfg_.token.scopes.end()) {
-      return false;
-    }
-  }
-  return true;
+  return PluginScopesAllow(action, cfg_.token.scopes);
 }
 
 void App::OpenPluginAction(int index) {

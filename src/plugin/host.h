@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <memory>
 #include <string>
 #include <vector>
@@ -86,6 +87,26 @@ class PluginHost {
   std::vector<std::unique_ptr<Loaded>> loaded_;
   std::vector<PluginInfo> plugins_;
 };
+
+// Whether an action's declared scopes are all present in the token scopes.
+// An empty token scope list means the token predates scope storage, so the
+// action stays visible and the server makes the final decision. "*" grants
+// everything.
+inline bool PluginScopesAllow(const PluginAction& action,
+                              const std::vector<std::string>& tokenScopes) {
+  if (action.scopes.empty() || tokenScopes.empty()) return true;
+  if (std::find(tokenScopes.begin(), tokenScopes.end(), "*") !=
+      tokenScopes.end()) {
+    return true;
+  }
+  for (const std::string& scope : action.scopes) {
+    if (std::find(tokenScopes.begin(), tokenScopes.end(), scope) ==
+        tokenScopes.end()) {
+      return false;
+    }
+  }
+  return true;
+}
 
 // Directories scanned for plugins, in order: $SPARK_PLUGIN_PATH, the user
 // data directory, the build-time install directory and the system paths.

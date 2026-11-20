@@ -317,14 +317,16 @@ Flarum 2.x 的置顶 / 锁定 / 隐藏 / 重命名 / 标签通过
    ```bash
    git push origin <branch>
    ```
-3. `.github/workflows/ci.yml` 会在 push / PR 时自动构建四类产物：
-   - Linux amd64：`sparkapp-core` + `sparkapp-tui` 两个 `.deb`，以及自包含运行包 `.tar.gz`
-   - Linux arm64：`sparkapp-core` + `sparkapp-tui` 两个 `.deb`，以及自包含运行包 `.tar.gz`
-   - Windows amd64 / arm64：`.zip`（静态链接 OpenSSL，单 exe）
-   - Debian 源码包：`.dsc` + `.orig.tar.gz` + `.debian.tar.xz` + `.changes` + `.buildinfo`
+3. `.github/workflows/ci.yml` 在 push / PR 时只做**构建和单元测试**，方便合并前
+   快速检查；打包和上传产物只在 `v*` tag 上执行：
+   - Linux amd64 / arm64：`sparkapp-core` + `sparkapp-tui` 两个 `.deb`，以及
+     自包含运行包 `.tar.gz`；
+   - Windows amd64 / arm64：`.zip`（静态链接 OpenSSL，单 exe）；
+   - Debian 源码包：`.dsc` + `.orig.tar.gz` + `.debian.tar.xz` + `.changes` + `.buildinfo`；
+   - GTK 前端 `spark-gui` 在独立的 `gtk-framework` 任务里构建（仅当
+     `src/gtk/` 存在），与 core / TUI 的构建互相独立，目前不进发布产物。
 
-   每个任务都会运行单元测试 / 打包检查，并把产物上传为 Actions artifact
-   （保留 90 天）。
+   tag 构建会把上述产物上传为 Actions artifact（保留 90 天）。
 4. 发布版本只需要推 tag：
    ```bash
    git tag v0.2.1

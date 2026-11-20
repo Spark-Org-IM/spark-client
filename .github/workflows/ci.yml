@@ -62,7 +62,11 @@ jobs:
       - name: Test
         run: ctest --test-dir build --output-on-failure
 
+      # Pushing a branch only compiles and tests. Release artifacts are
+      # produced exclusively for v* tags so a merge request can be checked
+      # quickly without paying for .deb / tar packaging.
       - name: Package .deb and Linux executable
+        if: github.ref_type == 'tag'
         run: |
           cd build
           cpack -G DEB
@@ -79,7 +83,7 @@ jobs:
           sha256sum ./*.deb ./*.tar.gz > "SHA256SUMS-${{ matrix.arch }}"
 
       - name: Verify Linux tarball
-        if: matrix.arch == 'amd64'
+        if: matrix.arch == 'amd64' && github.ref_type == 'tag'
         run: |
           cd build
           project_version=$(grep '^SPARK_TUI_PROJECT_VERSION:STRING=' CMakeCache.txt | cut -d= -f2)
@@ -95,6 +99,7 @@ jobs:
           fi
 
       - name: Upload Linux packages
+        if: github.ref_type == 'tag'
         uses: actions/upload-artifact@v7
         with:
           name: spark-tui-linux-${{ matrix.arch }}
@@ -167,6 +172,7 @@ jobs:
         run: ctest --test-dir build -C Release --output-on-failure
 
       - name: Package Windows executable
+        if: github.ref_type == 'tag'
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -183,6 +189,7 @@ jobs:
           "$hash  $(Split-Path $zip -Leaf)" | Out-File -Encoding ascii "build/SHA256SUMS-windows-${{ matrix.arch }}"
 
       - name: Upload Windows package
+        if: github.ref_type == 'tag'
         uses: actions/upload-artifact@v7
         with:
           name: spark-tui-windows-${{ matrix.arch }}
@@ -199,7 +206,18 @@ jobs:
       - name: Check out
         uses: actions/checkout@v7
 
+      - name: Detect GTK frontend
+        id: detect
+        run: |
+          if [ -f src/gtk/main.cpp ] && [ -f src/gtk/application.cpp ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "No GTK frontend sources found, skipping the GUI build."
+          fi
+
       - name: Install GTK build dependencies
+        if: steps.detect.outputs.present == 'true'
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
@@ -207,12 +225,14 @@ jobs:
             libgtk-4-dev libadwaita-1-dev pkg-config
 
       - name: Configure GTK frontend
+        if: steps.detect.outputs.present == 'true'
         run: |
           cmake -S . -B build-gtk -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DSPARK_TUI_BUILD_GTK=ON
 
       - name: Build GTK frontend
+        if: steps.detect.outputs.present == 'true'
         run: cmake --build build-gtk --target spark-gui --parallel 4
 
   source:
@@ -228,7 +248,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends dpkg-dev
 
+      - name: Check version sync
+        run: packaging/sync-version.sh --check
+
       - name: Build Debian source package
+        if: github.ref_type == 'tag'
         run: |
           version=$(head -n 1 VERSION | tr -d '[:space:]')
           project="${version%-*}"
@@ -236,15 +260,16 @@ jobs:
             echo "tag ${GITHUB_REF_NAME} does not match VERSION v${project}" >&2
             exit 1
           fi
-          packaging/sync-version.sh --check
           packaging/build-source.sh "${version}"
 
       - name: Checksums
+        if: github.ref_type == 'tag'
         run: |
           cd build/source
           sha256sum ./*.dsc ./*.orig.tar.* ./*.debian.tar.* ./*.changes ./*.buildinfo > SHA256SUMS-source
 
       - name: Upload source package
+        if: github.ref_type == 'tag'
         uses: actions/upload-artifact@v7
         with:
           name: spark-tui-source

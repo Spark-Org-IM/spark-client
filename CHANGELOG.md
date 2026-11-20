@@ -24,7 +24,10 @@
 - `sparkapp-core` 新增统一入口 `spark-client`，按会话启动 TUI 或 GTK 前端；
 - Linux 独立运行包内含 `libsparkapp-core.so`，rpath 为 `$ORIGIN`，解压即可运行；
 - 所有发布文件汇总为 `spark-tui_<version>_all.tar.gz` 总包；
-- push / PR 构建并上传 artifact，`v*` tag 自动汇总发布 Release。
+- push / PR 只构建并运行测试，方便合并前检查；`v*` tag 才打包、上传
+  artifact 并汇总发布 Release；
+- GTK 前端在独立的 `gtk-framework` 任务中构建，不影响 core / TUI，
+  目前不进入发布产物。
 
 ## 0.2.0
 

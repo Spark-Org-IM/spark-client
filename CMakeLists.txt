@@ -1,13 +1,13 @@
 cmake_minimum_required(VERSION 3.20)
 
 # VERSION is the single source of truth for the release version. It contains
-# the upstream version plus the Debian revision, for example `0.2.1-1`.
+# the upstream version plus the Debian revision, for example `0.2.2-1`.
 file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" SPARK_TUI_VERSION_LINE
      LIMIT_COUNT 1)
 string(STRIP "${SPARK_TUI_VERSION_LINE}" SPARK_TUI_VERSION_LINE)
 if(NOT SPARK_TUI_VERSION_LINE MATCHES "^([0-9]+\.[0-9]+\.[0-9]+)-([0-9]+)$")
   message(FATAL_ERROR
-    "VERSION must look like <upstream>-<debian-revision>, e.g. 0.2.1-1")
+    "VERSION must look like <upstream>-<debian-revision>, e.g. 0.2.2-1")
 endif()
 set(SPARK_TUI_PROJECT_VERSION "${CMAKE_MATCH_1}"
     CACHE STRING "spark-tui version" FORCE)
@@ -222,6 +222,12 @@ if(SPARK_TUI_BUILD_GTK)
   target_compile_definitions(spark-gui PRIVATE
     SPARK_TUI_VERSION="${PROJECT_VERSION}")
   target_compile_options(spark-gui PRIVATE ${SPARK_TUI_WARNING_FLAGS})
+
+  install(TARGETS spark-gui
+          RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}" COMPONENT gui)
+  install(FILES packaging/spark-gui.desktop
+          DESTINATION "${CMAKE_INSTALL_DATADIR}/applications"
+          COMPONENT gui)
 endif()
 
 # ---------------------------------------------------------------------------
@@ -240,9 +246,11 @@ install(TARGETS spark-tui
 install(FILES packaging/spark-tui.desktop
         DESTINATION "${CMAKE_INSTALL_DATADIR}/applications"
         COMPONENT tui)
+# Shared by the TUI and GTK desktop entries, so it ships with sparkapp-core
+# instead of being duplicated (and conflicting) in both frontend packages.
 install(FILES packaging/spark-tui.svg
         DESTINATION "${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps"
-        COMPONENT tui)
+        COMPONENT core)
 
 # ---------------------------------------------------------------------------
 # Tests
@@ -272,13 +280,23 @@ option(SPARK_TUI_DEB_SHLIBDEPS
        "Let dpkg-shlibdeps compute the runtime dependencies" ON)
 
 set(CPACK_DEB_COMPONENT_INSTALL ON)
-set(CPACK_COMPONENTS_ALL core tui)
+set(_spark_tui_components core tui)
+if(SPARK_TUI_BUILD_GTK)
+  list(APPEND _spark_tui_components gui)
+endif()
+set(CPACK_COMPONENTS_ALL ${_spark_tui_components})
 set(CPACK_DEBIAN_CORE_PACKAGE_NAME "sparkapp-core")
 set(CPACK_DEBIAN_TUI_PACKAGE_NAME  "sparkapp-tui")
+set(CPACK_DEBIAN_GUI_PACKAGE_NAME  "sparkapp-gui")
 
 if(SPARK_TUI_DEB_SHLIBDEPS)
   set(CPACK_DEBIAN_CORE_PACKAGE_SHLIBDEPS ON)
   set(CPACK_DEBIAN_TUI_PACKAGE_SHLIBDEPS OFF)
+  set(CPACK_DEBIAN_GUI_PACKAGE_SHLIBDEPS OFF)
+  if(SPARK_TUI_BUILD_GTK)
+    set(CPACK_DEBIAN_GUI_PACKAGE_DEPENDS
+        "sparkapp-core (= ${CPACK_PACKAGE_VERSION}), libgtk-4-1, libadwaita-1-0, libc6, libstdc++6")
+  endif()
   set(_spark_tui_depends "sparkapp-core (= ${CPACK_PACKAGE_VERSION}), libc6, libstdc++6")
   if(SPARK_TUI_FTXUI_FROM_SYSTEM)
     string(APPEND _spark_tui_depends
@@ -289,6 +307,11 @@ if(SPARK_TUI_DEB_SHLIBDEPS)
 else()
   set(CPACK_DEBIAN_CORE_PACKAGE_SHLIBDEPS OFF)
   set(CPACK_DEBIAN_TUI_PACKAGE_SHLIBDEPS OFF)
+  set(CPACK_DEBIAN_GUI_PACKAGE_SHLIBDEPS OFF)
+  if(SPARK_TUI_BUILD_GTK)
+    set(CPACK_DEBIAN_GUI_PACKAGE_DEPENDS
+        "sparkapp-core (= ${CPACK_PACKAGE_VERSION}), libgtk-4-1, libadwaita-1-0, libc6, libstdc++6")
+  endif()
   set(CPACK_DEBIAN_CORE_PACKAGE_DEPENDS
       "libc6, libstdc++6, libssl3t64 | libssl3")
   set(CPACK_DEBIAN_TUI_PACKAGE_DEPENDS

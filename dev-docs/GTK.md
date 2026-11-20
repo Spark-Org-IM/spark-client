@@ -298,20 +298,24 @@ spark-tui
 
 ## 6. .desktop 与打包
 
-GUI 桌面项：
+GUI 桌面项（`packaging/spark-gui.desktop`）：
 
 ```ini
 [Desktop Entry]
-Name=Spark ORG
-Comment=Spark ORG news, contacts, platforms and forum
-Exec=spark-gui %U
-Icon=org.sparkorg.Spark
-Terminal=false
 Type=Application
-Categories=Network;InstantMessaging;
+Name=Spark ORG
+GenericName=Spark ORG Client
+Comment=Browse Spark ORG news, contacts, platforms and the forum
+Exec=spark-gui %U
+Icon=spark-tui
+Terminal=false
+Categories=Network;News;InstantMessaging;
+Keywords=spark;news;forum;gui;gtk;org;
 StartupNotify=true
-DBusActivatable=true
 ```
+
+图标和 TUI 共用一个 `spark-tui.svg`，因此图标随 `sparkapp-core` 安装，
+避免在两个前端包里重复放置同一个文件造成 dpkg 冲突。
 
 TUI 桌面项：
 
@@ -330,19 +334,42 @@ GUI 还需要 AppStream 元数据 `packaging/spark-gui.metainfo.xml`，包含
 `id`、`name`、`summary`、`description`、`launchable`、`provides` 和截图。
 `launchable` 必须和 desktop 文件名/应用 ID 对应。
 
-Debian 打包拆成三个二进制包：
+Debian 打包拆成三个二进制包（CMake 组件 `core` / `tui` / `gui`）：
 
-- `sparkapp-core`：共享库 + `spark-client` 入口，不依赖 GTK / FTXUI；
+- `sparkapp-core`：共享库、`spark-client` 入口、桌面图标，不依赖 GTK / FTXUI；
 - `sparkapp-tui`：TUI，依赖 `sparkapp-core`，不依赖 GTK；
-- `sparkapp-gui`：GTK 前端，依赖 `sparkapp-core` + GTK4 / libadwaita；
-- 三者共享同一个 `spark_core` 源码和配置目录，但可以独立安装。
+- `sparkapp-gui`：GTK 前端，依赖 `sparkapp-core`、`libgtk-4-1`、
+  `libadwaita-1-0`，不依赖 FTXUI；
+- 三者共享同一个 `spark_core` 源码和配置目录，可以只装 TUI、只装 GUI，
+  或两个前端都装。
 
-`.desktop` 的 `Exec` 建议直接写 `spark-client`，这样同一个条目在终端、
-SSH、桌面启动器下都能落到正确的前端；只有需要强制 TUI 时才写
-`spark-tui`。
+对应的 `debian/sparkapp-*.install`：
 
-如果暂时只做一个包，至少把 GUI 依赖放到 `Recommends`，不要让只想用 TUI 的
-用户被迫安装整套 GNOME 依赖。
+```text
+sparkapp-core: usr/bin/spark-client
+               usr/lib/*/libsparkapp-core.so*
+               usr/share/icons/hicolor/scalable/apps/spark-tui.svg
+sparkapp-tui:  usr/bin/spark-tui
+               usr/share/applications/spark-tui.desktop
+sparkapp-gui:  usr/bin/spark-gui
+               usr/share/applications/spark-gui.desktop
+```
+
+`SPARK_TUI_BUILD_GTK=ON` 时 CMake 才会把 `gui` 组件加进
+`CPACK_COMPONENTS_ALL`；Debian 的 `debian/rules` 会打开它，所以源码包
+构建需要 `libgtk-4-dev`、`libadwaita-1-dev`。普通 TUI 构建和分支 CI
+不需要 GTK 开发包。
+
+CI 的行为：
+
+- 分支 / PR：单独的 `gtk-framework` 任务只编译 `spark-gui`，用于快速检查；
+- `v*` tag：Linux 打包任务打开 GTK 构建，生成 `sparkapp-gui` 的 `.deb`；
+  “解压即用”的 Linux tar 仍然只带 core + TUI，因为 GUI 需要系统的 GTK
+  运行库和桌面环境。
+
+`.desktop` 的 `Exec` 也可以直接写 `spark-client`，这样同一个条目在终端、
+SSH、桌面启动器下都能落到正确的前端；只有需要强制某个前端时才写
+`spark-tui` / `spark-gui`。
 
 ## 7. 后台任务与线程模型
 

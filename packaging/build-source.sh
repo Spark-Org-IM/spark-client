@@ -33,6 +33,7 @@ cp -a "$root/debian" "$stage/debian"
 rm -rf "$stage/debian/.debhelper" "$stage/debian/tmp" \
        "$stage/debian/files" "$stage/debian/debhelper-build-stamp" \
        "$stage/debian/sparkapp-core" "$stage/debian/sparkapp-tui" \
+       "$stage/debian/sparkapp-gui" \
        "$stage"/debian/*.substvars "$stage"/debian/*.debhelper.log
 sed -i "1s/^spark-tui ([^)]*)/spark-tui (${version})/" "$stage/debian/changelog"
 

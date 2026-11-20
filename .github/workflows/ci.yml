@@ -38,7 +38,13 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            build-essential cmake ninja-build libssl-dev dpkg-dev patchelf
+            build-essential cmake ninja-build libssl-dev dpkg-dev patchelf file
+
+      - name: Install GTK packaging dependencies
+        if: github.ref_type == 'tag'
+        run: |
+          sudo apt-get install -y --no-install-recommends \
+            libgtk-4-dev libadwaita-1-dev pkg-config
 
       - name: Cache FTXUI source (fallback build)
         uses: actions/cache@v6
@@ -54,7 +60,12 @@ jobs:
             echo "tag ${GITHUB_REF_NAME} does not match VERSION v${project}" >&2
             exit 1
           fi
-          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          # Only tag builds package sparkapp-gui, so the GUI is compiled
+          # into this build tree exclusively for releases.
+          gtk=OFF
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then gtk=ON; fi
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DSPARK_TUI_BUILD_GTK=$gtk
 
       - name: Build
         run: cmake --build build --parallel 4
@@ -200,6 +211,9 @@ jobs:
 
   gtk:
     name: gtk-framework
+    # Tag builds compile the GUI inside the linux packaging jobs; this job is
+    # the quick, separate syntax check for branch and pull-request pushes.
+    if: github.ref_type != 'tag'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:

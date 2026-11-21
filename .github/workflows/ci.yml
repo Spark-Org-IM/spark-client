@@ -333,22 +333,19 @@ jobs:
               "dist/spark-client_${version}_linux-${arch}.tar.gz" "${folder}"
           done
 
-          # Everything: both architectures' debs plus the source package.
-          folder="spark-client-${version}-all"
-          mkdir -p "dist/${folder}/amd64" "dist/${folder}/arm64" \
-                   "dist/${folder}/source"
-          cp dist/*_amd64.deb "dist/${folder}/amd64/"
-          cp dist/*_arm64.deb "dist/${folder}/arm64/"
-          cp dist/*.dsc dist/*.tar.xz dist/*.changes dist/*.buildinfo \
-             "dist/${folder}/source/"
-          cp README.md LICENSE "dist/${folder}/"
+          # Everything in one flat directory, ready to be imported into a
+          # Debian repository: no nested architecture or source folders.
+          all_dir="$(mktemp -d)"
+          cp dist/*.deb dist/*.dsc dist/*.tar.xz dist/*.changes \
+             dist/*.buildinfo README.md LICENSE "$all_dir/"
           (
-            cd "dist/${folder}"
-            find . -type f ! -name SHA256SUMS -printf '%P\n' | sort \
-              | xargs -r sha256sum > SHA256SUMS
+            cd "$all_dir"
+            find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%P\n' \
+              | sort | xargs -r sha256sum > SHA256SUMS
           )
-          tar -C dist -czf \
-            "dist/spark-client_${version}_all.tar.gz" "${folder}"
+          out="$PWD/dist/spark-client_${version}_all.tar.gz"
+          ( cd "$all_dir" && tar -czf "$out" * )
+          rm -rf "$all_dir"
 
           # Only the built tars and the Windows zips are release assets.
           rm -f dist/*.deb dist/*.dsc dist/*.tar.xz dist/*.changes \

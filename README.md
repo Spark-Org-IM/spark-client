@@ -333,9 +333,9 @@ Flarum 2.x 的置顶 / 锁定 / 隐藏 / 重命名 / 标签通过
    - `spark-client_<version>_linux-amd64.tar.gz` /
      `spark-client_<version>_linux-arm64.tar.gz`：只包含该架构的 core / tui /
      gui 三个 `.deb`，以及内部 `SHA256SUMS`；
-   - `spark-client_<version>_all.tar.gz`：两个架构的 `.deb`（`amd64/`、
-     `arm64/`）、源码包 `.dsc`、`.tar.xz`、`.changes`、`.buildinfo`，以及
-     README、LICENSE 和 `SHA256SUMS`；
+   - `spark-client_<version>_all.tar.gz`：两个架构的 `.deb`、源码包
+     `.dsc` / `.tar.xz` / `.changes` / `.buildinfo`，以及 README、LICENSE、
+     `SHA256SUMS`，所有文件平铺在 tar 根目录，便于直接导入 deb 源；
    - `spark-client_<version>_windows-amd64.zip` /
      `spark-client_<version>_windows-arm64.zip`。
 4. 发布版本只需要推 tag：
@@ -367,8 +367,8 @@ Flarum 2.x 的置顶 / 锁定 / 隐藏 / 重命名 / 标签通过
    Windows 解压 `spark-client_0.4.1_windows-amd64.zip` 或
    `spark-client_0.4.1_windows-arm64.zip` 后运行 `spark-tui.exe`。
 
-   `spark-client_0.4.1_all.tar.gz` 同时包含两个架构的 `.deb`、源码包和
-   校验和，可以直接作为手动导入 deb 源的目录。
+   `spark-client_0.4.1_all.tar.gz` 解压后文件平铺在当前目录，包含两个
+   架构的 `.deb`、源码包和校验和，可以直接作为手动导入 deb 源的目录。
 
    二进制包拆分为：
 

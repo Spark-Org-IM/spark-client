@@ -101,48 +101,19 @@ jobs:
       # Pushing a branch only compiles and tests. Release artifacts are
       # produced exclusively for v* tags so a merge request can be checked
       # quickly without paying for .deb / tar packaging.
-      - name: Package .deb and Linux executable
+      - name: Package .deb
         if: github.ref_type == 'tag'
         run: |
           cd build
           cpack -G DEB
-          project_version=$(grep '^SPARK_TUI_PROJECT_VERSION:STRING=' CMakeCache.txt | cut -d= -f2)
-          name="spark-client-${project_version}-linux-${{ matrix.arch }}"
-          mkdir -p "../$name"
-          cp spark-tui spark-client "../$name/"
-          cp -a libsparkapp-core.so* "../$name/"
-          # Build-tree rpaths point at the CI workspace; the tarball must resolve
-          # libsparkapp-core.so next to the binaries instead.
-          patchelf --set-rpath '$ORIGIN' "../$name/spark-tui" "../$name/spark-client"
-          cp ../README.md ../LICENSE ../docs/config.example.toml "../$name/"
-          tar -C .. -czf "spark-client_${project_version}_linux-${{ matrix.arch }}.tar.gz" "$name"
-          sha256sum ./*.deb ./*.tar.gz > "SHA256SUMS-${{ matrix.arch }}"
-
-      - name: Verify Linux tarball
-        if: matrix.arch == 'amd64' && github.ref_type == 'tag'
-        run: |
-          cd build
-          project_version=$(grep '^SPARK_TUI_PROJECT_VERSION:STRING=' CMakeCache.txt | cut -d= -f2)
-          rm -rf /tmp/tarcheck
-          mkdir -p /tmp/tarcheck
-          tar -xzf "spark-client_${project_version}_linux-amd64.tar.gz" -C /tmp/tarcheck
-          cd /tmp
-          env -u LD_LIBRARY_PATH "/tmp/tarcheck/spark-client-${project_version}-linux-amd64/spark-tui" --version
-          env -u LD_LIBRARY_PATH "/tmp/tarcheck/spark-client-${project_version}-linux-amd64/spark-client" --version
-          if readelf -d "/tmp/tarcheck/spark-client-${project_version}-linux-amd64/spark-tui" | grep -v '\$ORIGIN' | grep -q 'RPATH\|RUNPATH'; then
-            echo "tarball binary still contains a non-\$ORIGIN rpath" >&2
-            exit 1
-          fi
+          ls -l ./*.deb
 
       - name: Upload Linux packages
         if: github.ref_type == 'tag'
         uses: actions/upload-artifact@v7
         with:
           name: spark-client-linux-${{ matrix.arch }}
-          path: |
-            build/*.deb
-            build/*.tar.gz
-            build/SHA256SUMS-${{ matrix.arch }}
+          path: build/*.deb
           if-no-files-found: error
 
   windows:
@@ -323,6 +294,9 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Check out
+        uses: actions/checkout@v7
+
       - name: Download packages
         uses: actions/download-artifact@v8
         with:
@@ -330,30 +304,55 @@ jobs:
           merge-multiple: true
           path: dist
 
-      - name: Create release bundle
+      - name: Bundle release archives
         run: |
           set -eu
-          cd dist
-          rm -f SHA256SUMS* spark-client_*_all.tar.gz
           version="${GITHUB_REF_NAME#v}"
-          folder="spark-client-${version}"
-          rm -rf "../bundle"
-          mkdir -p "../bundle/${folder}"
-          find . -maxdepth 1 -type f \
-            \( -name '*.deb' -o -name '*.zip' -o -name '*.dsc' -o -name '*.changes' \
-               -o -name '*.buildinfo' -o -name '*.tar.xz' \
-               -o -name '*_linux-*.tar.gz' \) \
-            -exec cp {} "../bundle/${folder}/" \;
+
+          # Per-architecture Debian packages: core + tui + gui only.
+          for arch in amd64 arm64; do
+            folder="spark-client-${version}-linux-${arch}"
+            mkdir -p "dist/${folder}"
+            cp dist/sparkapp-*_${arch}.deb "dist/${folder}/"
+            (
+              cd "dist/${folder}"
+              sha256sum ./*.deb > SHA256SUMS
+            )
+            tar -C dist -czf \
+              "dist/spark-client_${version}_linux-${arch}.tar.gz" "${folder}"
+          done
+
+          # Everything in one flat directory, ready to be imported into a
+          # Debian repository: no nested architecture or source folders.
+          all_dir="$(mktemp -d)"
+          cp dist/*.deb dist/*.dsc dist/*.tar.xz dist/*.changes \
+             dist/*.buildinfo README.md LICENSE "$all_dir/"
           (
-            cd "../bundle/${folder}"
-            find . -maxdepth 1 -type f -printf '%f\n' | sort \
-              | xargs -r sha256sum > /tmp/spark-tui-bundle-SHA256SUMS
-            mv /tmp/spark-tui-bundle-SHA256SUMS SHA256SUMS
+            cd "$all_dir"
+            find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%P\n' \
+              | sort | xargs -r sha256sum > SHA256SUMS
           )
-          tar -C ../bundle -czf "spark-client_${version}_all.tar.gz" "${folder}"
+          out="$PWD/dist/spark-client_${version}_all.tar.gz"
+          ( cd "$all_dir" && tar -czf "$out" * )
+          rm -rf "$all_dir"
+
+          # Only the built tars and the Windows zips are release assets.
+          rm -f dist/*.deb dist/*.dsc dist/*.tar.xz dist/*.changes \
+                dist/*.buildinfo dist/SHA256SUMS-*
+          ls -l dist
 
       - name: Publish GitHub release
-        uses: softprops/action-gh-release@v3
-        with:
-          files: dist/spark-client_*_all.tar.gz
-          generate_release_notes: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          tag="$GITHUB_REF_NAME"
+          mapfile -t files < <(find dist -maxdepth 1 -type f | sort)
+          test "${#files[@]}" -gt 0
+          printf '%s\n' "${files[@]}"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" "${files[@]}" --clobber
+          else
+            gh release create "$tag" "${files[@]}" \
+              --title "$tag" --generate-notes
+          fi

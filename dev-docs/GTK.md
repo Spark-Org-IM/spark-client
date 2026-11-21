@@ -1,6 +1,6 @@
 # GTK 前端开发指南
 
-本文说明如何在 `spark-tui` 的 `spark_core` 之上增加一个 GTK4 / libadwaita
+本文说明如何在 `spark-client` 的 `spark_core` 之上增加一个 GTK4 / libadwaita
 前端，并由统一入口 `spark-client` 决定当前会话该启动 TUI 还是 GUI。
 界面风格以 **GNOME / libadwaita** 为准，不另做一套自定义主题。
 
@@ -47,9 +47,19 @@ src/
 │       ├── home_page.*  # 主页置顶新闻
 │       ├── list_page.*  # 新闻 / 联系 / 平台通用列表
 │       ├── forum_page.* # Flarum 讨论列表
-│       └── me_page.*    # 账号信息
+│       ├── me_page.*    # 账号信息
+│       └── plugins_page.* # 可选插件动作（仅在有可用动作时出现）
 └── ui/                  # 现有 FTXUI 前端，保持不动
 ```
+
+可选的插件动作只在至少一个动作对当前令牌可见时，才作为“插件”页加入侧边
+栏；没有安装插件时侧边栏与原来完全一致。动作表单由插件返回的 JSON 字段
+动态生成。
+
+侧边栏本身也是可配置顶栏：内置页面和插件动作按 `[topbar]` 配置的顺序
+显示，折叠项收进“已折叠”行；点击后主栏左滑、显示折叠列表和返回按钮。
+设置 → 顶栏 → 顶栏元素提供可见性、折叠和上下移动。详见
+[`TOPBAR.md`](TOPBAR.md)。
 
 页面不直接持有网络线程：所有请求都通过 `spark::Worker` 提交，结果用
 `PostToMainThread()` 回到 GTK 主循环。`Application` 在析构时先停止并

@@ -2,6 +2,7 @@
 
 #include <gdk/gdk.h>
 
+#include <algorithm>
 #include <string>
 #include <utility>
 
@@ -10,6 +11,7 @@
 #include "gtk/pages/home_page.h"
 #include "gtk/pages/list_page.h"
 #include "gtk/pages/me_page.h"
+#include "gtk/pages/plugins_page.h"
 #include "gtk/widgets.h"
 #include "i18n.h"
 
@@ -36,10 +38,11 @@ const char* IconFor(const std::string& id) {
   if (id == "platform") return "network-workgroup-symbolic";
   if (id == "forum") return "chat-message-new-symbolic";
   if (id == "me") return "avatar-default-symbolic";
+  if (id == "plugins") return "application-x-addon-symbolic";
   return "application-x-executable-symbolic";
 }
 
-GtkWidget* MakeSidebarRow(Page* page) {
+GtkWidget* MakeSidebarRow(const std::string& title, const char* icon) {
   GtkWidget* row = gtk_list_box_row_new();
   GtkWidget* box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
   gtk_widget_set_margin_top(box, 8);
@@ -47,14 +50,13 @@ GtkWidget* MakeSidebarRow(Page* page) {
   gtk_widget_set_margin_start(box, 12);
   gtk_widget_set_margin_end(box, 12);
 
-  GtkWidget* icon = gtk_image_new_from_icon_name(IconFor(page->Id()));
-  GtkWidget* label = gtk_label_new(page->Title().c_str());
+  GtkWidget* image = gtk_image_new_from_icon_name(icon);
+  GtkWidget* label = gtk_label_new(title.c_str());
   gtk_label_set_xalign(GTK_LABEL(label), 0.0f);
   gtk_widget_set_hexpand(label, TRUE);
-  gtk_box_append(GTK_BOX(box), icon);
+  gtk_box_append(GTK_BOX(box), image);
   gtk_box_append(GTK_BOX(box), label);
   gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), box);
-  g_object_set_data_full(G_OBJECT(row), "page", g_strdup(page->Id()), g_free);
   return row;
 }
 
@@ -74,7 +76,9 @@ Application::Application(AdwApplication* app, Config config)
       config_(std::move(config)),
       api_(config_.EffectiveMain(), config_.insecure, config_.token.plaintext),
       forum_(config_.EffectiveForum(), config_.insecure,
-             config_.forum.token) {
+             config_.forum.token),
+      plugins_(&api_, &forum_, &config_) {
+  plugins_.LoadAll();
   worker_ = std::make_unique<Worker>([this] {
     if (!running_.load()) return;
     PostToMainThread([this] {
@@ -99,10 +103,19 @@ PageContext Application::MakeContext() {
   ctx.forum = &forum_;
   ctx.config = &config_;
   ctx.worker = worker_.get();
+  ctx.plugins = &plugins_;
   ctx.lang = UiLanguage(config_);
   ctx.toast = [this](const std::string& message) { Toast(message); };
   ctx.push_detail = [this](const std::string& title, GtkWidget* content) {
     PushDetail(title, content);
+  };
+  ctx.refresh = [this](const std::string& target) {
+    for (const auto& page : pages_) {
+      const std::string id = page->Id();
+      if (id == target || (target == "news" && id == "home")) {
+        page->Refresh();
+      }
+    }
   };
   return ctx;
 }
@@ -120,6 +133,17 @@ void Application::BuildPages() {
       "network-workgroup-symbolic", ctx));
   pages_.push_back(std::make_unique<ForumPage>(ctx));
   pages_.push_back(std::make_unique<MePage>(ctx));
+  if (HasVisiblePluginActions(ctx)) {
+    pages_.push_back(std::make_unique<PluginsPage>(ctx));
+  }
+
+  pluginActions_.clear();
+  for (const PluginAction& action : plugins_.Actions()) {
+    if (PluginScopesAllow(action, config_.token.scopes)) {
+      pluginActions_.push_back(action);
+    }
+  }
+  RebuildTopBarItems();
 }
 
 void Application::BuildWindow() {
@@ -167,16 +191,50 @@ void Application::BuildWindow() {
 
   GtkWidget* sidebar = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
   gtk_widget_add_css_class(sidebar, "navigation-sidebar");
-  list_ = gtk_list_box_new();
-  gtk_list_box_set_selection_mode(GTK_LIST_BOX(list_), GTK_SELECTION_SINGLE);
-  gtk_list_box_set_show_separators(GTK_LIST_BOX(list_), FALSE);
-  gtk_widget_set_vexpand(list_, TRUE);
-  for (const auto& page : pages_) {
-    gtk_list_box_append(GTK_LIST_BOX(list_), MakeSidebarRow(page.get()));
-  }
-  g_signal_connect(list_, "row-activated",
+
+  sidebar_stack_ = gtk_stack_new();
+  gtk_stack_set_transition_type(
+      GTK_STACK(sidebar_stack_),
+      GTK_STACK_TRANSITION_TYPE_SLIDE_LEFT_RIGHT);
+  gtk_stack_set_transition_duration(GTK_STACK(sidebar_stack_), 250);
+  gtk_widget_set_vexpand(sidebar_stack_, TRUE);
+
+  sidebar_main_list_ = gtk_list_box_new();
+  gtk_list_box_set_selection_mode(GTK_LIST_BOX(sidebar_main_list_),
+                                  GTK_SELECTION_SINGLE);
+  gtk_list_box_set_show_separators(GTK_LIST_BOX(sidebar_main_list_), FALSE);
+  g_signal_connect(sidebar_main_list_, "row-activated",
                    G_CALLBACK(&Application::OnRowActivated), this);
-  gtk_box_append(GTK_BOX(sidebar), list_);
+  gtk_stack_add_named(GTK_STACK(sidebar_stack_),
+                      MakeScrolled(sidebar_main_list_), "main");
+
+  sidebar_collapsed_page_ = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+  GtkWidget* back_row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+  gtk_widget_set_margin_top(back_row, 8);
+  gtk_widget_set_margin_bottom(back_row, 4);
+  gtk_widget_set_margin_start(back_row, 8);
+  gtk_widget_set_margin_end(back_row, 8);
+  GtkWidget* back = gtk_button_new_with_label(
+      ("‹ " + T(ctx, "返回", "Back")).c_str());
+  gtk_widget_add_css_class(back, "flat");
+  gtk_widget_set_halign(back, GTK_ALIGN_START);
+  g_signal_connect(back, "clicked", G_CALLBACK(&Application::OnSidebarBack),
+                   this);
+  gtk_box_append(GTK_BOX(back_row), back);
+  gtk_box_append(GTK_BOX(sidebar_collapsed_page_), back_row);
+  sidebar_collapsed_list_ = gtk_list_box_new();
+  gtk_list_box_set_selection_mode(GTK_LIST_BOX(sidebar_collapsed_list_),
+                                  GTK_SELECTION_SINGLE);
+  gtk_list_box_set_show_separators(GTK_LIST_BOX(sidebar_collapsed_list_),
+                                   FALSE);
+  g_signal_connect(sidebar_collapsed_list_, "row-activated",
+                   G_CALLBACK(&Application::OnCollapsedRowActivated), this);
+  gtk_box_append(GTK_BOX(sidebar_collapsed_page_),
+                 MakeScrolled(sidebar_collapsed_list_));
+  gtk_stack_add_named(GTK_STACK(sidebar_stack_), sidebar_collapsed_page_,
+                      "collapsed");
+
+  gtk_box_append(GTK_BOX(sidebar), sidebar_stack_);
 
   GtkWidget* footer = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
   gtk_widget_add_css_class(footer, "sidebar-footer");
@@ -240,9 +298,8 @@ void Application::BuildWindow() {
   adw_application_window_set_content(ADW_APPLICATION_WINDOW(window_),
                                      toast_overlay_);
 
-  GtkListBoxRow* first = gtk_list_box_get_row_at_index(GTK_LIST_BOX(list_), 0);
-  if (first != nullptr) gtk_list_box_select_row(GTK_LIST_BOX(list_), first);
-  ShowPage("home");
+  RebuildSidebarLists();
+  ShowPage(FirstVisiblePage());
   InstallActions();
 }
 
@@ -279,20 +336,18 @@ void Application::ShowPage(const std::string& id) {
 
   gtk_stack_set_visible_child_name(GTK_STACK(stack_), id.c_str());
   current_page_ = id;
+  for (const TopBarItem& item : topbar_) {
+    if (item.id == "page:" + id && item.visible && item.collapsed) {
+      last_collapsed_id_ = item.id;
+      UpdateCollapseLabel();
+      break;
+    }
+  }
   if (root_page_ != nullptr) {
     adw_navigation_page_set_title(root_page_, target->Title().c_str());
   }
 
-  GtkWidget* child = gtk_widget_get_first_child(list_);
-  while (child != nullptr) {
-    const auto* page_id =
-        static_cast<const char*>(g_object_get_data(G_OBJECT(child), "page"));
-    if (page_id != nullptr && id == page_id) {
-      gtk_list_box_select_row(GTK_LIST_BOX(list_), GTK_LIST_BOX_ROW(child));
-      break;
-    }
-    child = gtk_widget_get_next_sibling(child);
-  }
+  SelectSidebarPage(id);
 
   if (split_ != nullptr &&
       adw_navigation_split_view_get_collapsed(
@@ -302,6 +357,281 @@ void Application::ShowPage(const std::string& id) {
   }
 
   target->OnShown();
+}
+
+void Application::RebuildTopBarItems() {
+  std::vector<TopBarSpec> specs;
+  std::vector<TopBarItem> items;
+  specs.reserve(pages_.size() + pluginActions_.size());
+  items.reserve(specs.capacity());
+
+  for (const auto& page : pages_) {
+    TopBarSpec spec;
+    spec.id = std::string("page:") + page->Id();
+    specs.push_back(spec);
+
+    TopBarItem item;
+    item.id = spec.id;
+    item.title = page->Title();
+    item.kind = TopBarItem::Kind::Page;
+    item.pageId = page->Id();
+    items.push_back(std::move(item));
+  }
+
+  for (int i = 0; i < static_cast<int>(pluginActions_.size()); ++i) {
+    const PluginAction& action = pluginActions_[static_cast<std::size_t>(i)];
+    TopBarSpec spec;
+    spec.id = "plugin:" + action.pluginId + ":" + action.id;
+    spec.visible = false;
+    spec.collapsed = true;
+    specs.push_back(spec);
+
+    TopBarItem item;
+    item.id = spec.id;
+    item.title = action.title.empty() ? action.id : action.title;
+    item.subtitle = action.pluginId;
+    for (const PluginInfo& info : plugins_.Plugins()) {
+      if (info.id == action.pluginId) {
+        item.subtitle = info.name;
+        break;
+      }
+    }
+    item.kind = TopBarItem::Kind::PluginAction;
+    item.action = i;
+    items.push_back(std::move(item));
+  }
+
+  const std::vector<TopBarState> states =
+      MergeTopBarStates(specs, config_.topBar);
+  topbar_.clear();
+  topbar_.reserve(states.size());
+  for (const TopBarState& state : states) {
+    const auto it = std::find_if(
+        items.begin(), items.end(),
+        [&](const TopBarItem& item) { return item.id == state.id; });
+    if (it == items.end()) continue;
+    TopBarItem item = *it;
+    item.visible = state.visible;
+    item.collapsed = state.collapsed;
+    topbar_.push_back(std::move(item));
+  }
+}
+
+bool Application::PageIsVisible(const std::string& pageId) const {
+  const std::string id = "page:" + pageId;
+  for (const TopBarItem& item : topbar_) {
+    if (item.id == id) return item.visible;
+  }
+  return false;
+}
+
+std::string Application::FirstVisiblePage() const {
+  for (const TopBarItem& item : topbar_) {
+    if (item.kind == TopBarItem::Kind::Page && item.visible) {
+      return item.pageId;
+    }
+  }
+  return "home";
+}
+
+GtkWidget* Application::MakeTopBarRow(const TopBarItem& item) {
+  const char* icon = item.kind == TopBarItem::Kind::Page
+                         ? IconFor(item.pageId)
+                         : "application-x-addon-symbolic";
+  GtkWidget* row = MakeSidebarRow(item.title, icon);
+  g_object_set_data_full(G_OBJECT(row), "topbar-id",
+                         g_strdup(item.id.c_str()), g_free);
+  return row;
+}
+
+GtkWidget* Application::MakeCollapseRow() {
+  GtkWidget* row = gtk_list_box_row_new();
+  GtkWidget* box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
+  gtk_widget_set_margin_top(box, 8);
+  gtk_widget_set_margin_bottom(box, 8);
+  gtk_widget_set_margin_start(box, 12);
+  gtk_widget_set_margin_end(box, 12);
+
+  GtkWidget* image =
+      gtk_image_new_from_icon_name("view-more-horizontal-symbolic");
+  GtkWidget* label = gtk_label_new("");
+  gtk_label_set_xalign(GTK_LABEL(label), 0.0f);
+  gtk_widget_set_hexpand(label, TRUE);
+  GtkWidget* triangle = gtk_label_new("▾");
+  gtk_widget_add_css_class(triangle, "dim-label");
+
+  gtk_box_append(GTK_BOX(box), image);
+  gtk_box_append(GTK_BOX(box), label);
+  gtk_box_append(GTK_BOX(box), triangle);
+  gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), box);
+  g_object_set_data_full(G_OBJECT(row), "topbar-id", g_strdup("collapse"),
+                         g_free);
+
+  sidebar_collapse_row_ = row;
+  sidebar_collapse_label_ = label;
+  UpdateCollapseLabel();
+  return row;
+}
+
+void Application::UpdateCollapseLabel() {
+  if (sidebar_collapse_label_ == nullptr) return;
+  const std::string lang = UiLanguage(config_);
+  std::string label = Tr("已折叠", "Collapsed", lang);
+  for (const TopBarItem& item : topbar_) {
+    if (item.id == last_collapsed_id_ && item.visible && item.collapsed) {
+      label = item.title;
+      break;
+    }
+  }
+  gtk_label_set_text(GTK_LABEL(sidebar_collapse_label_), label.c_str());
+}
+
+void Application::RebuildSidebarLists() {
+  if (sidebar_main_list_ == nullptr || sidebar_collapsed_list_ == nullptr) {
+    return;
+  }
+  ClearListBox(GTK_LIST_BOX(sidebar_main_list_));
+  ClearListBox(GTK_LIST_BOX(sidebar_collapsed_list_));
+  sidebar_collapse_row_ = nullptr;
+  sidebar_collapse_label_ = nullptr;
+
+  bool has_collapsed = false;
+  for (const TopBarItem& item : topbar_) {
+    if (!item.visible) continue;
+    if (item.collapsed) {
+      has_collapsed = true;
+      gtk_list_box_append(GTK_LIST_BOX(sidebar_collapsed_list_),
+                          MakeTopBarRow(item));
+    } else {
+      gtk_list_box_append(GTK_LIST_BOX(sidebar_main_list_),
+                          MakeTopBarRow(item));
+    }
+  }
+  if (has_collapsed) {
+    gtk_list_box_append(GTK_LIST_BOX(sidebar_main_list_),
+                        MakeCollapseRow());
+  }
+  if (!has_collapsed && sidebar_collapsed_) {
+    ShowSidebarCollapsed(false);
+  }
+  UpdateCollapseLabel();
+
+  if (!PageIsVisible(current_page_)) {
+    ShowPage(FirstVisiblePage());
+  } else {
+    SelectSidebarPage(current_page_);
+  }
+}
+
+void Application::SelectSidebarPage(const std::string& pageId) {
+  if (sidebar_main_list_ == nullptr) return;
+  const std::string target = "page:" + pageId;
+  GtkWidget* child = gtk_widget_get_first_child(sidebar_main_list_);
+  bool collapsed_match = false;
+  while (child != nullptr) {
+    const auto* id =
+        static_cast<const char*>(g_object_get_data(G_OBJECT(child), "topbar-id"));
+    if (id != nullptr && target == id) {
+      gtk_list_box_select_row(GTK_LIST_BOX(sidebar_main_list_),
+                              GTK_LIST_BOX_ROW(child));
+      return;
+    }
+    if (id != nullptr && std::string(id) == "collapse") {
+      collapsed_match = true;
+    }
+    child = gtk_widget_get_next_sibling(child);
+  }
+  if (collapsed_match) {
+    for (const TopBarItem& item : topbar_) {
+      if (item.id == target && item.visible && item.collapsed &&
+          sidebar_collapse_row_ != nullptr) {
+        gtk_list_box_select_row(GTK_LIST_BOX(sidebar_main_list_),
+                                GTK_LIST_BOX_ROW(sidebar_collapse_row_));
+        return;
+      }
+    }
+  }
+  gtk_list_box_unselect_all(GTK_LIST_BOX(sidebar_main_list_));
+}
+
+void Application::ShowSidebarCollapsed(bool collapsed) {
+  if (sidebar_stack_ == nullptr) return;
+  sidebar_collapsed_ = collapsed;
+  gtk_stack_set_transition_type(
+      GTK_STACK(sidebar_stack_),
+      collapsed ? GTK_STACK_TRANSITION_TYPE_SLIDE_LEFT
+                : GTK_STACK_TRANSITION_TYPE_SLIDE_RIGHT);
+  gtk_stack_set_visible_child_name(GTK_STACK(sidebar_stack_),
+                                   collapsed ? "collapsed" : "main");
+
+  if (collapsed && sidebar_collapsed_list_ != nullptr &&
+      !last_collapsed_id_.empty()) {
+    GtkWidget* child = gtk_widget_get_first_child(sidebar_collapsed_list_);
+    while (child != nullptr) {
+      const auto* id = static_cast<const char*>(
+          g_object_get_data(G_OBJECT(child), "topbar-id"));
+      if (id != nullptr && last_collapsed_id_ == id) {
+        gtk_list_box_select_row(GTK_LIST_BOX(sidebar_collapsed_list_),
+                                GTK_LIST_BOX_ROW(child));
+        break;
+      }
+      child = gtk_widget_get_next_sibling(child);
+    }
+  }
+}
+
+void Application::ActivateTopBarId(const std::string& id) {
+  if (id == "collapse") {
+    ShowSidebarCollapsed(true);
+    return;
+  }
+  if (id.rfind("page:", 0) == 0) {
+    ShowPage(id.substr(5));
+    return;
+  }
+  if (id.rfind("plugin:", 0) != 0) return;
+  for (const TopBarItem& item : topbar_) {
+    if (item.id != id) continue;
+    if (item.action >= 0 &&
+        item.action < static_cast<int>(pluginActions_.size())) {
+      ShowPluginActionDialog(MakeContext(),
+                             pluginActions_[static_cast<std::size_t>(item.action)],
+                             window_);
+    }
+    return;
+  }
+}
+
+void Application::SaveTopBarPrefs() {
+  std::vector<TopBarState> states;
+  states.reserve(topbar_.size());
+  for (const TopBarItem& item : topbar_) {
+    states.push_back({item.id, item.visible, item.collapsed});
+  }
+  config_.topBar = TopBarPrefsFromStates(states);
+  config_.Save();
+}
+
+void Application::OnCollapsedRowActivated(GtkListBox*, GtkListBoxRow* row,
+                                          gpointer data) {
+  if (row == nullptr) return;
+  auto* self = static_cast<Application*>(data);
+  const auto* id = static_cast<const char*>(
+      g_object_get_data(G_OBJECT(row), "topbar-id"));
+  if (id == nullptr) return;
+  self->last_collapsed_id_ = id;
+  self->ShowSidebarCollapsed(false);
+  self->ActivateTopBarId(id);
+  self->UpdateCollapseLabel();
+}
+
+void Application::OnCollapseRowActivated(GtkListBox*, GtkListBoxRow*,
+                                         gpointer data) {
+  static_cast<Application*>(data)->ShowSidebarCollapsed(true);
+}
+
+void Application::OnSidebarBack(GtkButton*, gpointer data) {
+  static_cast<Application*>(data)->ShowSidebarCollapsed(false);
 }
 
 void Application::PushDetail(const std::string& title, GtkWidget* content) {
@@ -326,8 +656,19 @@ void Application::Toast(const std::string& message) {
 }
 
 void Application::ShowSettings() {
+  if (settings_window_ != nullptr) {
+    gtk_window_present(GTK_WINDOW(settings_window_));
+    return;
+  }
   const PageContext ctx = MakeContext();
   GtkWidget* preferences = adw_preferences_window_new();
+  settings_window_ = preferences;
+  g_signal_connect(
+      preferences, "destroy",
+      G_CALLBACK(+[](GtkWidget*, gpointer data) {
+        static_cast<Application*>(data)->settings_window_ = nullptr;
+      }),
+      this);
   gtk_window_set_title(GTK_WINDOW(preferences),
                        T(ctx, "设置", "Settings").c_str());
   gtk_window_set_transient_for(GTK_WINDOW(preferences), GTK_WINDOW(window_));
@@ -402,6 +743,26 @@ void Application::ShowSettings() {
   adw_preferences_page_add(ADW_PREFERENCES_PAGE(page),
                            ADW_PREFERENCES_GROUP(appearance));
 
+  GtkWidget* navigation = adw_preferences_group_new();
+  adw_preferences_group_set_title(ADW_PREFERENCES_GROUP(navigation),
+                                  T(ctx, "顶栏", "Top bar").c_str());
+  GtkWidget* topbar_row = adw_action_row_new();
+  adw_preferences_row_set_title(ADW_PREFERENCES_ROW(topbar_row),
+                                T(ctx, "顶栏元素", "Top bar entries").c_str());
+  adw_action_row_set_subtitle(
+      ADW_ACTION_ROW(topbar_row),
+      T(ctx, "可见性、折叠与顺序",
+        "Visibility, collapsed group and order")
+          .c_str());
+  adw_action_row_add_suffix(ADW_ACTION_ROW(topbar_row),
+                            gtk_image_new_from_icon_name("go-next-symbolic"));
+  gtk_list_box_row_set_activatable(GTK_LIST_BOX_ROW(topbar_row), TRUE);
+  g_signal_connect(topbar_row, "activated",
+                   G_CALLBACK(&Application::OnTopBarSettings), this);
+  adw_preferences_group_add(ADW_PREFERENCES_GROUP(navigation), topbar_row);
+  adw_preferences_page_add(ADW_PREFERENCES_PAGE(page),
+                           ADW_PREFERENCES_GROUP(navigation));
+
   GtkWidget* accounts = adw_preferences_group_new();
   adw_preferences_group_set_title(ADW_PREFERENCES_GROUP(accounts),
                                   T(ctx, "账号", "Accounts").c_str());
@@ -423,6 +784,179 @@ void Application::ShowSettings() {
   adw_preferences_window_add(ADW_PREFERENCES_WINDOW(preferences),
                              ADW_PREFERENCES_PAGE(page));
   gtk_window_present(GTK_WINDOW(preferences));
+}
+
+void Application::ShowTopBarSettings() {
+  const std::string lang = UiLanguage(config_);
+  AdwDialog* dialog = ADW_DIALOG(adw_dialog_new());
+  adw_dialog_set_title(
+      dialog, Tr("顶栏元素", "Top bar entries", lang).c_str());
+  adw_dialog_set_content_width(dialog, 640);
+  adw_dialog_set_content_height(dialog, 620);
+
+  AdwToolbarView* toolbar = ADW_TOOLBAR_VIEW(adw_toolbar_view_new());
+  AdwHeaderBar* header = ADW_HEADER_BAR(adw_header_bar_new());
+  adw_toolbar_view_add_top_bar(toolbar, GTK_WIDGET(header));
+
+  GtkWidget* box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12);
+  gtk_widget_set_margin_top(box, 18);
+  gtk_widget_set_margin_bottom(box, 18);
+  gtk_widget_set_margin_start(box, 18);
+  gtk_widget_set_margin_end(box, 18);
+  gtk_box_append(
+      GTK_BOX(box),
+      MakeDimLabel(
+          Tr("列表顺序就是顶栏顺序；折叠的元素收进“已折叠”。",
+             "List order is top bar order; collapsed entries go into the "
+             "collapsed group.",
+             lang),
+          true));
+
+  topbar_settings_list_ = gtk_list_box_new();
+  gtk_list_box_set_selection_mode(GTK_LIST_BOX(topbar_settings_list_),
+                                  GTK_SELECTION_NONE);
+  gtk_widget_add_css_class(topbar_settings_list_, "boxed-list");
+  FillTopBarSettingsList();
+  gtk_box_append(GTK_BOX(box), MakeScrolled(topbar_settings_list_));
+  adw_toolbar_view_set_content(toolbar, box);
+  adw_dialog_set_child(dialog, GTK_WIDGET(toolbar));
+
+  g_signal_connect(
+      dialog, "closed",
+      G_CALLBACK(+[](AdwDialog*, gpointer data) {
+        static_cast<Application*>(data)->topbar_settings_list_ = nullptr;
+      }),
+      this);
+  adw_dialog_present(dialog, settings_window_ != nullptr ? settings_window_
+                                                          : window_);
+}
+
+void Application::FillTopBarSettingsList() {
+  if (topbar_settings_list_ == nullptr) return;
+  ClearListBox(GTK_LIST_BOX(topbar_settings_list_));
+  const std::string lang = UiLanguage(config_);
+
+  for (int i = 0; i < static_cast<int>(topbar_.size()); ++i) {
+    const TopBarItem& item = topbar_[static_cast<std::size_t>(i)];
+    GtkWidget* row = gtk_list_box_row_new();
+    gtk_list_box_row_set_activatable(GTK_LIST_BOX_ROW(row), FALSE);
+
+    GtkWidget* outer = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
+    gtk_widget_set_margin_top(outer, 12);
+    gtk_widget_set_margin_bottom(outer, 12);
+    gtk_widget_set_margin_start(outer, 12);
+    gtk_widget_set_margin_end(outer, 12);
+
+    GtkWidget* head = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+    GtkWidget* title = MakeLabel(item.title, "heading", false);
+    gtk_widget_set_hexpand(title, TRUE);
+    std::string kind = Tr("页面", "Page", lang);
+    if (item.kind == TopBarItem::Kind::PluginAction) {
+      kind = Tr("插件", "Plugin", lang);
+      if (!item.subtitle.empty()) kind += " · " + item.subtitle;
+    }
+    gtk_box_append(GTK_BOX(head), title);
+    gtk_box_append(GTK_BOX(head), MakeDimLabel(kind, false));
+
+    GtkWidget* controls = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+    GtkWidget* shown = gtk_switch_new();
+    gtk_switch_set_active(GTK_SWITCH(shown), item.visible);
+    g_object_set_data(G_OBJECT(shown), "topbar-index", GINT_TO_POINTER(i + 1));
+    g_signal_connect(shown, "notify::active",
+                     G_CALLBACK(&Application::OnTopBarVisible), this);
+
+    GtkWidget* collapsed = gtk_switch_new();
+    gtk_switch_set_active(GTK_SWITCH(collapsed), item.collapsed);
+    g_object_set_data(G_OBJECT(collapsed), "topbar-index",
+                      GINT_TO_POINTER(i + 1));
+    g_signal_connect(collapsed, "notify::active",
+                     G_CALLBACK(&Application::OnTopBarCollapsed), this);
+
+    GtkWidget* spacer = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+    gtk_widget_set_hexpand(spacer, TRUE);
+
+    GtkWidget* up = gtk_button_new_from_icon_name("go-up-symbolic");
+    gtk_widget_add_css_class(up, "flat");
+    gtk_widget_set_sensitive(up, i > 0);
+    g_object_set_data(G_OBJECT(up), "topbar-index", GINT_TO_POINTER(i + 1));
+    g_object_set_data(G_OBJECT(up), "topbar-delta", GINT_TO_POINTER(-1));
+    g_signal_connect(up, "clicked", G_CALLBACK(&Application::OnTopBarMove),
+                     this);
+
+    GtkWidget* down = gtk_button_new_from_icon_name("go-down-symbolic");
+    gtk_widget_add_css_class(down, "flat");
+    gtk_widget_set_sensitive(down, i + 1 < static_cast<int>(topbar_.size()));
+    g_object_set_data(G_OBJECT(down), "topbar-index", GINT_TO_POINTER(i + 1));
+    g_object_set_data(G_OBJECT(down), "topbar-delta", GINT_TO_POINTER(1));
+    g_signal_connect(down, "clicked", G_CALLBACK(&Application::OnTopBarMove),
+                     this);
+
+    gtk_box_append(GTK_BOX(controls),
+                   MakeDimLabel(Tr("显示", "Shown", lang), false));
+    gtk_box_append(GTK_BOX(controls), shown);
+    gtk_box_append(GTK_BOX(controls),
+                   MakeDimLabel(Tr("折叠", "Collapsed", lang), false));
+    gtk_box_append(GTK_BOX(controls), collapsed);
+    gtk_box_append(GTK_BOX(controls), spacer);
+    gtk_box_append(GTK_BOX(controls), up);
+    gtk_box_append(GTK_BOX(controls), down);
+
+    gtk_box_append(GTK_BOX(outer), head);
+    gtk_box_append(GTK_BOX(outer), controls);
+    gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), outer);
+    gtk_list_box_append(GTK_LIST_BOX(topbar_settings_list_), row);
+  }
+}
+
+void Application::OnTopBarSettings(GtkWidget*, gpointer data) {
+  static_cast<Application*>(data)->ShowTopBarSettings();
+}
+
+void Application::OnTopBarVisible(GObject* object, GParamSpec*, gpointer data) {
+  auto* self = static_cast<Application*>(data);
+  const int index =
+      GPOINTER_TO_INT(g_object_get_data(object, "topbar-index")) - 1;
+  if (index < 0 || index >= static_cast<int>(self->topbar_.size())) return;
+  TopBarItem& item = self->topbar_[static_cast<std::size_t>(index)];
+  item.visible = gtk_switch_get_active(GTK_SWITCH(object));
+  if (!item.visible && item.id == self->last_collapsed_id_) {
+    self->last_collapsed_id_.clear();
+  }
+  self->SaveTopBarPrefs();
+  self->RebuildSidebarLists();
+}
+
+void Application::OnTopBarCollapsed(GObject* object, GParamSpec*,
+                                    gpointer data) {
+  auto* self = static_cast<Application*>(data);
+  const int index =
+      GPOINTER_TO_INT(g_object_get_data(object, "topbar-index")) - 1;
+  if (index < 0 || index >= static_cast<int>(self->topbar_.size())) return;
+  TopBarItem& item = self->topbar_[static_cast<std::size_t>(index)];
+  item.collapsed = gtk_switch_get_active(GTK_SWITCH(object));
+  if (!item.collapsed && item.id == self->last_collapsed_id_) {
+    self->last_collapsed_id_.clear();
+  }
+  self->SaveTopBarPrefs();
+  self->RebuildSidebarLists();
+}
+
+void Application::OnTopBarMove(GtkButton* button, gpointer data) {
+  auto* self = static_cast<Application*>(data);
+  const int index =
+      GPOINTER_TO_INT(g_object_get_data(G_OBJECT(button), "topbar-index")) - 1;
+  const int delta =
+      GPOINTER_TO_INT(g_object_get_data(G_OBJECT(button), "topbar-delta"));
+  const int target = index + delta;
+  if (index < 0 || index >= static_cast<int>(self->topbar_.size()) ||
+      target < 0 || target >= static_cast<int>(self->topbar_.size())) {
+    return;
+  }
+  std::swap(self->topbar_[static_cast<std::size_t>(index)],
+            self->topbar_[static_cast<std::size_t>(target)]);
+  self->SaveTopBarPrefs();
+  self->FillTopBarSettingsList();
+  self->RebuildSidebarLists();
 }
 
 void Application::ShowAbout() {
@@ -469,9 +1003,9 @@ void Application::OnRowActivated(GtkListBox*, GtkListBoxRow* row,
                                  gpointer data) {
   if (row == nullptr) return;
   auto* self = static_cast<Application*>(data);
-  const auto* page =
-      static_cast<const char*>(g_object_get_data(G_OBJECT(row), "page"));
-  if (page != nullptr) self->ShowPage(page);
+  const auto* id = static_cast<const char*>(
+      g_object_get_data(G_OBJECT(row), "topbar-id"));
+  if (id != nullptr) self->ActivateTopBarId(id);
 }
 
 void Application::OnSettings(GSimpleAction*, GVariant*, gpointer data) {

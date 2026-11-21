@@ -55,9 +55,8 @@ jobs:
       - name: Configure
         run: |
           version=$(head -n 1 VERSION | tr -d '[:space:]')
-          project="${version%-*}"
-          if [ "${GITHUB_REF_TYPE}" = "tag" ] && [ "${GITHUB_REF_NAME}" != "v${project}" ]; then
-            echo "tag ${GITHUB_REF_NAME} does not match VERSION v${project}" >&2
+          if [ "${GITHUB_REF_TYPE}" = "tag" ] && [ "${GITHUB_REF_NAME}" != "v${version}" ]; then
+            echo "tag ${GITHUB_REF_NAME} does not match VERSION v${version}" >&2
             exit 1
           fi
           # Only tag builds package sparkapp-gui, so the GUI is compiled
@@ -73,6 +72,32 @@ jobs:
       - name: Test
         run: ctest --test-dir build --output-on-failure
 
+      # Plugins are never built here. This only proves that the installed
+      # plugin SDK is self-contained and usable by an out-of-tree project.
+      - name: Plugin SDK smoke test
+        run: |
+          cat > /tmp/spark_sdk_smoke.cpp <<'EOF'
+          #include <string>
+
+          #include "plugin/sdk.h"
+
+          class SmokePlugin : public spark::plugin::Plugin {
+           public:
+            explicit SmokePlugin(const spark_host_api* host)
+                : spark::plugin::Plugin(host) {}
+            std::string Id() const override { return "sdk-smoke"; }
+            std::string ActionsJson() const override { return "[]"; }
+            std::string RunJson(const std::string&,
+                                const std::string&) override {
+              return "{\"ok\":true}";
+            }
+          };
+
+          SPARK_PLUGIN_EXPORT(SmokePlugin)
+          EOF
+          g++ -std=c++20 -shared -fPIC -Wall -Wextra -Wpedantic \
+            -I src /tmp/spark_sdk_smoke.cpp -o /tmp/spark_sdk_smoke.so
+
       # Pushing a branch only compiles and tests. Release artifacts are
       # produced exclusively for v* tags so a merge request can be checked
       # quickly without paying for .deb / tar packaging.
@@ -82,7 +107,7 @@ jobs:
           cd build
           cpack -G DEB
           project_version=$(grep '^SPARK_TUI_PROJECT_VERSION:STRING=' CMakeCache.txt | cut -d= -f2)
-          name="spark-tui-${project_version}-linux-${{ matrix.arch }}"
+          name="spark-client-${project_version}-linux-${{ matrix.arch }}"
           mkdir -p "../$name"
           cp spark-tui spark-client "../$name/"
           cp -a libsparkapp-core.so* "../$name/"
@@ -90,7 +115,7 @@ jobs:
           # libsparkapp-core.so next to the binaries instead.
           patchelf --set-rpath '$ORIGIN' "../$name/spark-tui" "../$name/spark-client"
           cp ../README.md ../LICENSE ../docs/config.example.toml "../$name/"
-          tar -C .. -czf "spark-tui_${project_version}_linux-${{ matrix.arch }}.tar.gz" "$name"
+          tar -C .. -czf "spark-client_${project_version}_linux-${{ matrix.arch }}.tar.gz" "$name"
           sha256sum ./*.deb ./*.tar.gz > "SHA256SUMS-${{ matrix.arch }}"
 
       - name: Verify Linux tarball
@@ -100,11 +125,11 @@ jobs:
           project_version=$(grep '^SPARK_TUI_PROJECT_VERSION:STRING=' CMakeCache.txt | cut -d= -f2)
           rm -rf /tmp/tarcheck
           mkdir -p /tmp/tarcheck
-          tar -xzf "spark-tui_${project_version}_linux-amd64.tar.gz" -C /tmp/tarcheck
+          tar -xzf "spark-client_${project_version}_linux-amd64.tar.gz" -C /tmp/tarcheck
           cd /tmp
-          env -u LD_LIBRARY_PATH "/tmp/tarcheck/spark-tui-${project_version}-linux-amd64/spark-tui" --version
-          env -u LD_LIBRARY_PATH "/tmp/tarcheck/spark-tui-${project_version}-linux-amd64/spark-client" --version
-          if readelf -d "/tmp/tarcheck/spark-tui-${project_version}-linux-amd64/spark-tui" | grep -v '\$ORIGIN' | grep -q 'RPATH\|RUNPATH'; then
+          env -u LD_LIBRARY_PATH "/tmp/tarcheck/spark-client-${project_version}-linux-amd64/spark-tui" --version
+          env -u LD_LIBRARY_PATH "/tmp/tarcheck/spark-client-${project_version}-linux-amd64/spark-client" --version
+          if readelf -d "/tmp/tarcheck/spark-client-${project_version}-linux-amd64/spark-tui" | grep -v '\$ORIGIN' | grep -q 'RPATH\|RUNPATH'; then
             echo "tarball binary still contains a non-\$ORIGIN rpath" >&2
             exit 1
           fi
@@ -113,7 +138,7 @@ jobs:
         if: github.ref_type == 'tag'
         uses: actions/upload-artifact@v7
         with:
-          name: spark-tui-linux-${{ matrix.arch }}
+          name: spark-client-linux-${{ matrix.arch }}
           path: |
             build/*.deb
             build/*.tar.gz
@@ -162,9 +187,8 @@ jobs:
             throw "vcpkg toolchain not found under $vcpkg"
           }
           $version = (Get-Content VERSION -TotalCount 1).Trim()
-          $project = $version.Split('-')[0]
-          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -ne "v$project") {
-            throw "tag $env:GITHUB_REF_NAME does not match VERSION v$project"
+          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -ne "v$version") {
+            throw "tag $env:GITHUB_REF_NAME does not match VERSION v$version"
           }
           $args = @(
             '-S', '.', '-B', 'build',
@@ -188,13 +212,13 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $version = (Select-String -Path build/CMakeCache.txt -Pattern '^SPARK_TUI_PROJECT_VERSION:STRING=(.+)$').Matches.Groups[1].Value
-          $name = "spark-tui-$version-windows-${{ matrix.arch }}"
+          $name = "spark-client-$version-windows-${{ matrix.arch }}"
           $stage = "dist/$name"
           New-Item -ItemType Directory -Force -Path $stage | Out-Null
           Copy-Item build/Release/spark-tui.exe $stage
           Copy-Item -Path README.md,LICENSE -Destination $stage
           Copy-Item docs/config.example.toml $stage
-          $zip = "build/spark-tui_${version}_windows-${{ matrix.arch }}.zip"
+          $zip = "build/spark-client_${version}_windows-${{ matrix.arch }}.zip"
           Compress-Archive -Path $stage -DestinationPath $zip -Force
           $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
           "$hash  $(Split-Path $zip -Leaf)" | Out-File -Encoding ascii "build/SHA256SUMS-windows-${{ matrix.arch }}"
@@ -203,7 +227,7 @@ jobs:
         if: github.ref_type == 'tag'
         uses: actions/upload-artifact@v7
         with:
-          name: spark-tui-windows-${{ matrix.arch }}
+          name: spark-client-windows-${{ matrix.arch }}
           path: |
             build/*.zip
             build/SHA256SUMS-windows-${{ matrix.arch }}
@@ -269,9 +293,8 @@ jobs:
         if: github.ref_type == 'tag'
         run: |
           version=$(head -n 1 VERSION | tr -d '[:space:]')
-          project="${version%-*}"
-          if [ "${GITHUB_REF_TYPE}" = "tag" ] && [ "${GITHUB_REF_NAME}" != "v${project}" ]; then
-            echo "tag ${GITHUB_REF_NAME} does not match VERSION v${project}" >&2
+          if [ "${GITHUB_REF_TYPE}" = "tag" ] && [ "${GITHUB_REF_NAME}" != "v${version}" ]; then
+            echo "tag ${GITHUB_REF_NAME} does not match VERSION v${version}" >&2
             exit 1
           fi
           packaging/build-source.sh "${version}"
@@ -280,13 +303,13 @@ jobs:
         if: github.ref_type == 'tag'
         run: |
           cd build/source
-          sha256sum ./*.dsc ./*.orig.tar.* ./*.debian.tar.* ./*.changes ./*.buildinfo > SHA256SUMS-source
+          sha256sum ./*.dsc ./*.tar.xz ./*.changes ./*.buildinfo > SHA256SUMS-source
 
       - name: Upload source package
         if: github.ref_type == 'tag'
         uses: actions/upload-artifact@v7
         with:
-          name: spark-tui-source
+          name: spark-client-source
           path: build/source/*
           if-no-files-found: error
 
@@ -303,7 +326,7 @@ jobs:
       - name: Download packages
         uses: actions/download-artifact@v8
         with:
-          pattern: spark-tui-*
+          pattern: spark-client-*
           merge-multiple: true
           path: dist
 
@@ -311,33 +334,26 @@ jobs:
         run: |
           set -eu
           cd dist
-          rm -f SHA256SUMS* spark-tui_*_all.tar.gz
+          rm -f SHA256SUMS* spark-client_*_all.tar.gz
           version="${GITHUB_REF_NAME#v}"
-          folder="spark-tui-${version}"
+          folder="spark-client-${version}"
           rm -rf "../bundle"
           mkdir -p "../bundle/${folder}"
-          cp ./*.deb ./*.zip ./*.dsc ./*.orig.tar.* ./*.debian.tar.* \
-             ./*.changes ./*.buildinfo ./*_linux-*.tar.gz \
-             "../bundle/${folder}/"
+          find . -maxdepth 1 -type f \
+            \( -name '*.deb' -o -name '*.zip' -o -name '*.dsc' -o -name '*.changes' \
+               -o -name '*.buildinfo' -o -name '*.tar.xz' \
+               -o -name '*_linux-*.tar.gz' \) \
+            -exec cp {} "../bundle/${folder}/" \;
           (
             cd "../bundle/${folder}"
             find . -maxdepth 1 -type f -printf '%f\n' | sort \
               | xargs -r sha256sum > /tmp/spark-tui-bundle-SHA256SUMS
             mv /tmp/spark-tui-bundle-SHA256SUMS SHA256SUMS
           )
-          tar -C ../bundle -czf "spark-tui_${version}_all.tar.gz" "${folder}"
-
-      - name: Generate checksums
-        run: |
-          cd dist
-          rm -f SHA256SUMS*
-          find . -maxdepth 1 -type f -printf '%f\n' | sort \
-            | xargs -r sha256sum > /tmp/spark-tui-SHA256SUMS
-          mv /tmp/spark-tui-SHA256SUMS SHA256SUMS
-          cat SHA256SUMS
+          tar -C ../bundle -czf "spark-client_${version}_all.tar.gz" "${folder}"
 
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v3
         with:
-          files: dist/*
+          files: dist/spark-client_*_all.tar.gz
           generate_release_notes: true

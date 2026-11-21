@@ -1,4 +1,4 @@
-Source: spark-tui
+Source: spark-client
 Section: utils
 Priority: optional
 Maintainer: Jianyin Li <jianyin@sparkorg.dpdns.org>
@@ -14,10 +14,13 @@ Package: sparkapp-core
 Architecture: any
 Section: libs
 Depends: ${shlibs:Depends}, ${misc:Depends}
+Provides: spark-plugin-abi-1
 Description: shared core library and launcher for Spark ORG clients
  Common configuration, Spark ORG API, Flarum API and service-source logic
  used by the Spark ORG terminal and GTK frontends, plus the spark-client
  launcher which starts the frontend that matches the current session.
+ It also ships the header-only plugin SDK; plugins are separate packages
+ built by their own projects.
 
 Package: sparkapp-tui
 Architecture: any

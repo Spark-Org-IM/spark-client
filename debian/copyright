@@ -1,5 +1,5 @@
 Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
-Upstream-Name: spark-tui
+Upstream-Name: spark-client
 Source: https://github.com/Spark-Org-IM/spark-client
 
 Files: *

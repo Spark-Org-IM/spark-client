@@ -45,6 +45,16 @@ std::string JsonString(const nlohmann::json& object, const char* key) {
   return object.at(key).get<std::string>();
 }
 
+std::vector<std::string> JsonStringArray(const nlohmann::json& object,
+                                         const char* key) {
+  std::vector<std::string> values;
+  if (!object.contains(key) || !object.at(key).is_array()) return values;
+  for (const auto& item : object.at(key)) {
+    if (item.is_string()) values.push_back(item.get<std::string>());
+  }
+  return values;
+}
+
 std::string JsonId(const nlohmann::json& object, const char* key) {
   if (!object.contains(key)) return {};
   const auto& value = object.at(key);
@@ -84,6 +94,7 @@ Config LoadLegacyJson(const std::string& path) {
     cfg.token.id = JsonId(token, "id");
     cfg.token.label = JsonString(token, "label");
     cfg.token.username = JsonString(token, "username");
+    cfg.token.scopes = JsonStringArray(token, "scopes");
   }
   return cfg;
 }
@@ -173,6 +184,33 @@ Config Config::Load(const std::string& path) {
     if (const auto username = ReadText(*auth, "username")) {
       cfg.token.username = *username;
     }
+    if (const toml::array* scopes = (*auth)["scopes"].as_array()) {
+      for (const auto& item : *scopes) {
+        if (const auto scope = item.value<std::string>()) {
+          cfg.token.scopes.push_back(*scope);
+        }
+      }
+    }
+  }
+
+  if (const toml::table* topbar = root["topbar"].as_table()) {
+    if (const toml::array* items = (*topbar)["items"].as_array()) {
+      for (const auto& node : *items) {
+        const toml::table* item = node.as_table();
+        if (item == nullptr) continue;
+        TopBarPref pref;
+        if (const auto id = (*item)["id"].value<std::string>()) {
+          pref.id = *id;
+        }
+        if (const auto visible = (*item)["visible"].value<bool>()) {
+          pref.visible = *visible;
+        }
+        if (const auto collapsed = (*item)["collapsed"].value<bool>()) {
+          pref.collapsed = *collapsed;
+        }
+        if (!pref.id.empty()) cfg.topBar.push_back(std::move(pref));
+      }
+    }
   }
 
   if (const toml::table* forum = root["forum"].as_table()) {
@@ -231,7 +269,26 @@ bool Config::Save() const {
     if (!token.id.empty()) auth.insert_or_assign("token_id", token.id);
     if (!token.label.empty()) auth.insert_or_assign("token_label", token.label);
     if (!token.username.empty()) auth.insert_or_assign("username", token.username);
+    if (!token.scopes.empty()) {
+      toml::array scopes;
+      for (const std::string& scope : token.scopes) scopes.push_back(scope);
+      auth.insert_or_assign("scopes", std::move(scopes));
+    }
     root.insert_or_assign("auth", std::move(auth));
+  }
+
+  if (!topBar.empty()) {
+    toml::array items;
+    for (const TopBarPref& pref : topBar) {
+      toml::table item;
+      item.insert_or_assign("id", pref.id);
+      item.insert_or_assign("visible", pref.visible);
+      item.insert_or_assign("collapsed", pref.collapsed);
+      items.push_back(std::move(item));
+    }
+    toml::table topbar;
+    topbar.insert_or_assign("items", std::move(items));
+    root.insert_or_assign("topbar", std::move(topbar));
   }
 
   if (!forum.Empty()) {

@@ -1,19 +1,28 @@
 cmake_minimum_required(VERSION 3.20)
 
-# VERSION is the single source of truth for the release version. It contains
-# the upstream version plus the Debian revision, for example `0.2.2-1`.
+# VERSION is the single source of truth for the release version and follows
+# SemVer: MAJOR.MINOR.PATCH, for example `0.3.0`.
 file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" SPARK_TUI_VERSION_LINE
      LIMIT_COUNT 1)
 string(STRIP "${SPARK_TUI_VERSION_LINE}" SPARK_TUI_VERSION_LINE)
-if(NOT SPARK_TUI_VERSION_LINE MATCHES "^([0-9]+\.[0-9]+\.[0-9]+)-([0-9]+)$")
-  message(FATAL_ERROR
-    "VERSION must look like <upstream>-<debian-revision>, e.g. 0.2.2-1")
+if(NOT SPARK_TUI_VERSION_LINE MATCHES "^([0-9]+\.[0-9]+\.[0-9]+)$")
+  message(FATAL_ERROR "VERSION must be a SemVer, e.g. 0.3.0")
 endif()
-set(SPARK_TUI_PROJECT_VERSION "${CMAKE_MATCH_1}"
-    CACHE STRING "spark-tui version" FORCE)
+set(SPARK_TUI_PROJECT_VERSION "${SPARK_TUI_VERSION_LINE}"
+    CACHE STRING "spark-client version" FORCE)
 set(SPARK_TUI_PACKAGE_VERSION "${SPARK_TUI_VERSION_LINE}"
-    CACHE STRING "spark-tui package version" FORCE)
-project(spark-tui VERSION ${SPARK_TUI_PROJECT_VERSION} LANGUAGES CXX)
+    CACHE STRING "spark-client package version" FORCE)
+project(spark-client VERSION ${SPARK_TUI_PROJECT_VERSION} LANGUAGES CXX)
+
+# Keep the packaged ABI marker in sync with the C header plugins compile
+# against. Out-of-tree plugin packages depend on spark-plugin-abi-<N>.
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/src/plugin/api.h"
+     _spark_plugin_abi_line REGEX "^#define SPARK_PLUGIN_ABI_VERSION ")
+string(REGEX MATCH "[0-9]+" SPARK_PLUGIN_ABI_VERSION
+       "${_spark_plugin_abi_line}")
+if(NOT SPARK_PLUGIN_ABI_VERSION)
+  message(FATAL_ERROR "cannot read SPARK_PLUGIN_ABI_VERSION from plugin/api.h")
+endif()
 
 # Build-tree binaries are copied into the standalone Linux tarball, so their
 # rpath must not contain an absolute build directory. With this option CMake
@@ -144,6 +153,8 @@ set(SPARK_CORE_SOURCES
   src/forum/models.cpp
   src/forum/render.cpp
   src/ui/render_detail.cpp
+  src/plugin/host.cpp
+  src/topbar.cpp
 )
 if(UNIX AND NOT APPLE)
   add_library(spark_core SHARED ${SPARK_CORE_SOURCES})
@@ -155,9 +166,11 @@ else()
   add_library(spark_core STATIC ${SPARK_CORE_SOURCES})
 endif()
 target_include_directories(spark_core PUBLIC src)
-target_link_libraries(spark_core PUBLIC spark_json spark_httplib PRIVATE spark_toml)
+target_link_libraries(spark_core PUBLIC spark_json spark_httplib
+  PRIVATE spark_toml ${CMAKE_DL_LIBS})
 target_compile_definitions(spark_core PRIVATE
-  SPARK_TUI_VERSION="${PROJECT_VERSION}")
+  SPARK_TUI_VERSION="${PROJECT_VERSION}"
+  SPARK_PLUGIN_DIR="${CMAKE_INSTALL_FULL_LIBDIR}/spark-client/plugins")
 target_compile_options(spark_core PRIVATE ${SPARK_TUI_WARNING_FLAGS})
 if(WIN32)
   # OpenUrl uses ShellExecuteA.
@@ -213,6 +226,7 @@ if(SPARK_TUI_BUILD_GTK)
     src/gtk/pages/list_page.cpp
     src/gtk/pages/forum_page.cpp
     src/gtk/pages/me_page.cpp
+    src/gtk/pages/plugins_page.cpp
   )
   target_link_libraries(spark-gui PRIVATE
     spark_core
@@ -229,6 +243,20 @@ if(SPARK_TUI_BUILD_GTK)
           DESTINATION "${CMAKE_INSTALL_DATADIR}/applications"
           COMPONENT gui)
 endif()
+
+# ---------------------------------------------------------------------------
+# Plugin SDK
+#
+# The host only loads plugins. Official and third-party plugins are built in
+# their own projects and are never part of this build or its packages. Install
+# the header-only SDK so those projects can compile against the stable C ABI
+# without carrying a copy of the host sources.
+# ---------------------------------------------------------------------------
+install(FILES
+          src/plugin/api.h
+          src/plugin/sdk.h
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/spark-client/plugin"
+        COMPONENT core)
 
 # ---------------------------------------------------------------------------
 # Install
@@ -261,16 +289,22 @@ if(SPARK_TUI_BUILD_TESTS)
   target_link_libraries(spark-tui-tests PRIVATE spark_core)
   target_compile_options(spark-tui-tests PRIVATE ${SPARK_TUI_WARNING_FLAGS})
   add_test(NAME spark-tui-tests COMMAND spark-tui-tests)
+
+  if(NOT WIN32)
+    add_executable(spark-plugin-tests tests/test_plugin.cpp)
+    target_link_libraries(spark-plugin-tests PRIVATE spark_core)
+    target_compile_options(spark-plugin-tests PRIVATE ${SPARK_TUI_WARNING_FLAGS})
+    add_test(NAME spark-plugin-tests COMMAND spark-plugin-tests)
+  endif()
 endif()
 
 # ---------------------------------------------------------------------------
 # CPack (DEB)
 # ---------------------------------------------------------------------------
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-set(CPACK_PACKAGE_NAME            "spark-tui")
+set(CPACK_PACKAGE_NAME            "spark-client")
 set(CPACK_PACKAGE_VENDOR          "Spark ORG")
-set(CPACK_PACKAGE_DESCRIPTION_SUMMARY
-    "Terminal client for Spark ORG (news / contact / platform / forum)")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Spark ORG client")
 set(CPACK_PACKAGE_VERSION         "${SPARK_TUI_PACKAGE_VERSION}")
 set(CPACK_PACKAGE_CONTACT         "Jianyin Li <jianyin@sparkorg.dpdns.org>")
 set(CPACK_RESOURCE_FILE_LICENSE   "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
@@ -284,10 +318,27 @@ set(_spark_tui_components core tui)
 if(SPARK_TUI_BUILD_GTK)
   list(APPEND _spark_tui_components gui)
 endif()
+set(CPACK_COMPONENT_CORE_DESCRIPTION
+    "Shared runtime: API and forum clients, configuration and the plugin loader.")
+set(CPACK_COMPONENT_TUI_DESCRIPTION
+    "Terminal frontend for Spark ORG news, contacts, platforms and the Flarum forum.")
+if(SPARK_TUI_BUILD_GTK)
+  set(CPACK_COMPONENT_GUI_DESCRIPTION
+      "GTK4 / libadwaita frontend for Spark ORG news, contacts, platforms and the Flarum forum.")
+endif()
 set(CPACK_COMPONENTS_ALL ${_spark_tui_components})
 set(CPACK_DEBIAN_CORE_PACKAGE_NAME "sparkapp-core")
 set(CPACK_DEBIAN_TUI_PACKAGE_NAME  "sparkapp-tui")
 set(CPACK_DEBIAN_GUI_PACKAGE_NAME  "sparkapp-gui")
+# All binary packages come from the spark-client source package; reprepro
+# rejects a binary whose Source does not match the .dsc.
+set(CPACK_DEBIAN_CORE_PACKAGE_SOURCE "spark-client")
+set(CPACK_DEBIAN_TUI_PACKAGE_SOURCE  "spark-client")
+set(CPACK_DEBIAN_GUI_PACKAGE_SOURCE  "spark-client")
+# Plugins are separate packages from separate sources. They depend on this
+# virtual package instead of an exact core version, so the ABI version decides
+# compatibility and plugin releases can move independently.
+set(CPACK_DEBIAN_CORE_PACKAGE_PROVIDES "spark-plugin-abi-${SPARK_PLUGIN_ABI_VERSION}")
 
 if(SPARK_TUI_DEB_SHLIBDEPS)
   set(CPACK_DEBIAN_CORE_PACKAGE_SHLIBDEPS ON)

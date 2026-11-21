@@ -2,6 +2,9 @@
 
 #include <optional>
 #include <string>
+#include <vector>
+
+#include "topbar.h"
 
 namespace spark {
 
@@ -19,6 +22,10 @@ struct StoredToken {
   std::string id;
   std::string label;
   std::string username;
+  // Scopes of the current token, as reported when it was issued. Empty means
+  // unknown (for example a token saved before scopes were stored); frontends
+  // then keep every action visible.
+  std::vector<std::string> scopes;
 
   bool Empty() const { return plaintext.empty(); }
 };
@@ -70,6 +77,8 @@ struct Config {
   bool showRawDetails = false;
   StoredToken token;
   ForumAccount forum;
+  // Order and flags of the configurable top bar / navigation entries.
+  std::vector<TopBarPref> topBar;
 
   // Not serialised; where this config was loaded from / is saved to.
   std::string configPath;

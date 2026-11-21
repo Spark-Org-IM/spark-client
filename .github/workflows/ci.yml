@@ -344,8 +344,42 @@ jobs:
           merge-multiple: true
           path: dist
 
-      # Packages stay separate: every .deb, runtime tar, zip, source file
-      # and checksum file becomes its own release asset.
+      # Debian artifacts (binary .deb + source package) are folded into one
+      # tar for importing into an apt repository. Everything else stays a
+      # separate release asset.
+      - name: Bundle Debian packages
+        run: |
+          set -eu
+          version="${GITHUB_REF_NAME#v}"
+          folder="spark-client-${version}-deb"
+          mkdir -p "deb/${folder}/amd64" "deb/${folder}/arm64" \
+                   "deb/${folder}/source"
+          for file in dist/*.deb; do
+            case "$file" in
+              *_amd64.deb) cp "$file" "deb/${folder}/amd64/" ;;
+              *_arm64.deb) cp "$file" "deb/${folder}/arm64/" ;;
+              *)
+                echo "unexpected .deb name: $file" >&2
+                exit 1
+                ;;
+            esac
+          done
+          cp dist/*.dsc dist/*.tar.xz dist/*.changes dist/*.buildinfo \
+             "deb/${folder}/source/"
+          if [ -f dist/SHA256SUMS-source ]; then
+            mv dist/SHA256SUMS-source "deb/${folder}/source/"
+          fi
+          (
+            cd "deb/${folder}"
+            find . -type f ! -name SHA256SUMS -printf '%P\n' | sort \
+              | xargs -r sha256sum > SHA256SUMS
+          )
+          tar -C deb -czf "dist/spark-client_${version}_deb.tar.gz" \
+            "${folder}"
+          rm -f dist/*.deb dist/*.dsc dist/*.tar.xz dist/*.changes \
+                dist/*.buildinfo
+          ls -l dist
+
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}

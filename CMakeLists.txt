@@ -145,6 +145,7 @@ set(SPARK_CORE_SOURCES
   src/forum/render.cpp
   src/ui/render_detail.cpp
   src/plugin/host.cpp
+  src/topbar.cpp
 )
 if(UNIX AND NOT APPLE)
   add_library(spark_core SHARED ${SPARK_CORE_SOURCES})

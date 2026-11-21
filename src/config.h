@@ -4,6 +4,8 @@
 #include <string>
 #include <vector>
 
+#include "topbar.h"
+
 namespace spark {
 
 // Built-in defaults, mirroring the Android client.
@@ -75,6 +77,8 @@ struct Config {
   bool showRawDetails = false;
   StoredToken token;
   ForumAccount forum;
+  // Order and flags of the configurable top bar / navigation entries.
+  std::vector<TopBarPref> topBar;
 
   // Not serialised; where this config was loaded from / is saved to.
   std::string configPath;

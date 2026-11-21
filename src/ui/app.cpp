@@ -84,8 +84,11 @@ int App::Run() {
   RefreshVisiblePluginActions();
 
   // Start on the home dashboard; news loads only when the user opens it.
+  // Rebuild the top bar after tab_ is set so its initial selection is Home.
   tab_ = Tab::Home;
-  LoadHome();
+  RebuildTopBar();
+  EnsureVisibleTab();
+  if (tab_ == Tab::Home) LoadHome();
 
   auto renderer = Renderer([this] { return Render(); });
   auto root = CatchEvent(renderer, [this](Event event) {
@@ -1536,6 +1539,7 @@ void App::OnLoginSuccess(const DeviceToken& token) {
   mode_ = Mode::Browse;
   SetStatus(T("登录成功", "Signed in"));
   LoadMe();
+  RebuildTopBar();
 }
 
 void App::CancelLogin() {
@@ -1666,6 +1670,7 @@ void App::Logout() {
   cfg_.token = {};
   me_ = nlohmann::json::object();
   SaveConfig();
+  RebuildTopBar();
   SetStatus(T("已登出", "Signed out"));
 
   if (!id.empty() && !token.empty()) {
@@ -1680,6 +1685,17 @@ void App::SwitchTab(Tab tab) {
   if (tab_ == tab) return;
   tab_ = tab;
   mode_ = Mode::Browse;
+  topBarFocused_ = false;
+  for (int i = 0; i < static_cast<int>(topBar_.size()); ++i) {
+    if (topBar_[i].kind == TopBarEntry::Kind::Page &&
+        topBar_[i].page == tab) {
+      topBarSelected_ = i;
+      if (topBar_[i].visible && topBar_[i].collapsed) {
+        topBarCollapsedId_ = topBar_[i].id;
+      }
+      break;
+    }
+  }
   detail_ = nlohmann::json::object();
   detailKind_.clear();
   detailRaw_ = false;
@@ -2347,14 +2363,14 @@ Element App::Render() {
                                                    : Color::Yellow)),
   });
 
-  Element layout = vbox({
-                       Header(),
-                       separator(),
-                       body | flex,
-                       separator(),
-                       footer,
-                   }) |
-                   border;
+  Elements layout_items;
+  layout_items.push_back(Header());
+  if (topBarStripOpen_) layout_items.push_back(TopBarStrip());
+  layout_items.push_back(separator());
+  layout_items.push_back(body | flex);
+  layout_items.push_back(separator());
+  layout_items.push_back(footer);
+  Element layout = vbox(std::move(layout_items)) | border;
 
   if (quitConfirm_) {
     Element dialog =
@@ -2467,17 +2483,40 @@ Element App::Header() {
 }
 
 Element App::TabBar() {
-  const std::array<std::string, 7> names = {
-      T("1 主页", "1 Home"),       T("2 新闻", "2 News"),
-      T("3 联系", "3 Contact"),    T("4 平台", "4 Platform"),
-      T("5 搜索", "5 Search"),     T("6 论坛", "6 Forum"),
-      T("7 我的", "7 Me")};
+  const std::vector<int> items = TopBarBarItems();
+  if (items.empty()) return text(T("顶栏为空", "Top bar empty")) | dim;
+
   Elements tabs;
-  for (int i = 0; i < 7; ++i) {
-    Element item = text(names[static_cast<std::size_t>(i)]);
-    if (static_cast<int>(tab_) == i) item = item | inverted | bold;
+  for (std::size_t i = 0; i < items.size(); ++i) {
+    const int index = items[i];
+    std::string label;
+    if (index == -1) {
+      label = TopBarCollapseLabel() + " ▾";
+    } else {
+      label = topBar_[static_cast<std::size_t>(index)].title;
+      if (!topBar_[static_cast<std::size_t>(index)].visible) continue;
+    }
+
+    bool selected = false;
+    if (topBarFocused_) {
+      selected = index == topBarSelected_;
+    } else if (index >= 0) {
+      const TopBarEntry& entry = topBar_[static_cast<std::size_t>(index)];
+      selected = entry.kind == TopBarEntry::Kind::Page && entry.page == tab_;
+    } else {
+      for (const TopBarEntry& entry : topBar_) {
+        if (entry.kind == TopBarEntry::Kind::Page && entry.page == tab_ &&
+            entry.visible && entry.collapsed) {
+          selected = true;
+          break;
+        }
+      }
+    }
+
+    Element item = text(label);
+    if (selected) item = item | inverted | bold;
     tabs.push_back(item);
-    if (i < 6) tabs.push_back(text(" "));
+    if (i + 1 < items.size()) tabs.push_back(text(" "));
   }
   return hbox(std::move(tabs));
 }
@@ -2490,6 +2529,7 @@ Element App::Content() {
   if (mode_ == Mode::InstanceSettings) return InstanceSettingsView();
   if (mode_ == Mode::PluginMenu) return PluginMenuView();
   if (mode_ == Mode::PluginForm) return PluginFormView();
+  if (mode_ == Mode::TopBarSettings) return TopBarSettingsView();
   if (mode_ == Mode::HomeManage) return HomeManageView();
   if (mode_ == Mode::ForumManage) return ForumManageView();
   if (mode_ == Mode::ForumApi) return ForumApiView();
@@ -3373,7 +3413,7 @@ Element App::LoginView() {
 
 Element App::SettingsMenuView() {
   Elements rows;
-  for (int i = 0; i < 3; ++i) {
+  for (int i = 0; i < 4; ++i) {
     const bool selected = settings_.selected == i;
     const Decorator style = selected ? Decorator(bold) : Decorator(nothing);
     std::string label;
@@ -3385,9 +3425,16 @@ Element App::SettingsMenuView() {
     } else if (i == 1) {
       label = T("详情显示底层数据", "Show raw data in details");
       value = cfg_.showRawDetails ? T("开", "On") : T("关", "Off");
-    } else {
+    } else if (i == 2) {
       label = T("界面语言", "Interface language");
       value = UiLanguageDisplay();
+    } else {
+      label = T("顶栏元素", "Top bar entries");
+      int visible = 0;
+      for (const TopBarEntry& entry : topBar_) {
+        if (entry.visible) ++visible;
+      }
+      value = std::to_string(visible) + "/" + std::to_string(topBar_.size());
     }
     rows.push_back(hbox({
         text(selected ? "▶ " : "  ") |
@@ -3677,6 +3724,161 @@ Element App::PluginFormView() {
   return vbox(std::move(lines)) | border;
 }
 
+Element App::TopBarStrip() {
+  std::vector<int> collapsed;
+  for (int i = 0; i < static_cast<int>(topBar_.size()); ++i) {
+    const TopBarEntry& entry = topBar_[static_cast<std::size_t>(i)];
+    if (entry.visible && entry.collapsed) collapsed.push_back(i);
+  }
+  if (collapsed.empty()) return text("");
+
+  const int count = static_cast<int>(collapsed.size());
+  topBarStripSelected_ = std::clamp(topBarStripSelected_, 0, count - 1);
+  const int screen_width = std::max(20, screen_.dimx() - 4);
+  const int budget = std::max(12, screen_width - 8);
+
+  std::vector<std::string> labels;
+  std::vector<int> widths;
+  for (int index : collapsed) {
+    labels.push_back(topBar_[static_cast<std::size_t>(index)].title);
+    widths.push_back(std::max(2, DisplayWidth(labels.back())));
+  }
+
+  int lo = topBarStripSelected_;
+  int hi = topBarStripSelected_;
+  int total = widths[static_cast<std::size_t>(lo)];
+  bool take_left = true;
+  while (true) {
+    bool grew = false;
+    if (take_left) {
+      if (lo > 0 && total + widths[static_cast<std::size_t>(lo - 1)] + 2 <=
+                        budget) {
+        --lo;
+        total += widths[static_cast<std::size_t>(lo)] + 2;
+        grew = true;
+      } else if (hi + 1 < count &&
+                 total + widths[static_cast<std::size_t>(hi + 1)] + 2 <=
+                     budget) {
+        ++hi;
+        total += widths[static_cast<std::size_t>(hi)] + 2;
+        grew = true;
+      }
+    } else {
+      if (hi + 1 < count &&
+          total + widths[static_cast<std::size_t>(hi + 1)] + 2 <= budget) {
+        ++hi;
+        total += widths[static_cast<std::size_t>(hi)] + 2;
+        grew = true;
+      } else if (lo > 0 &&
+                 total + widths[static_cast<std::size_t>(lo - 1)] + 2 <=
+                     budget) {
+        --lo;
+        total += widths[static_cast<std::size_t>(lo)] + 2;
+        grew = true;
+      }
+    }
+    take_left = !take_left;
+    if (!grew) break;
+  }
+
+  int before = 0;
+  for (int i = lo; i < topBarStripSelected_; ++i) {
+    before += widths[static_cast<std::size_t>(i)] + 2;
+  }
+  int left_pad =
+      std::max(0, screen_width / 2 -
+                       (before + widths[static_cast<std::size_t>(
+                                       topBarStripSelected_)] /
+                                       2));
+  if (lo > 0) left_pad = std::max(0, left_pad - 2);
+  if (hi + 1 < count) left_pad = std::max(0, left_pad - 2);
+
+  Elements row;
+  if (lo > 0) row.push_back(text("‹ ") | dim);
+  if (left_pad > 0) {
+    row.push_back(text("") | size(WIDTH, EQUAL, left_pad));
+  }
+  for (int i = lo; i <= hi; ++i) {
+    Element item = text(labels[static_cast<std::size_t>(i)]);
+    if (i == topBarStripSelected_) item = item | inverted | bold;
+    row.push_back(item);
+    if (i < hi) row.push_back(text("  "));
+  }
+  if (hi + 1 < count) row.push_back(text(" ›") | dim);
+  row.push_back(filler());
+  return hbox(std::move(row));
+}
+
+Element App::TopBarSettingsView() {
+  Elements lines;
+  lines.push_back(text(T("顶栏设置", "Top bar")) | bold);
+  lines.push_back(
+      text(T("调整顺序、是否显示，以及是否收进“已折叠”。",
+             "Change order, visibility, and whether an entry goes into the "
+             "collapsed group.")) |
+      dim);
+  lines.push_back(separator());
+
+  if (topBar_.empty()) {
+    lines.push_back(text(T("没有顶栏元素。", "No top bar entries.")) | dim);
+  }
+  const int total = static_cast<int>(topBar_.size());
+  const int height = std::max(3, screen_.dimy() - 9);
+  const int start =
+      std::clamp(topBarSettings_.selected - height / 2, 0,
+                 std::max(0, total - height));
+  const int end = std::min(total, start + height);
+  for (int i = start; i < end; ++i) {
+    const TopBarEntry& entry = topBar_[static_cast<std::size_t>(i)];
+    const bool selected = topBarSettings_.selected == i;
+    const Decorator style = selected ? Decorator(bold) : Decorator(nothing);
+
+    std::string kind = entry.subtitle.empty()
+                           ? T("页面", "Page")
+                           : (T("插件", "Plugin") + " · " + entry.subtitle);
+    if (entry.kind == TopBarEntry::Kind::Page) {
+      kind = T("页面", "Page");
+    }
+
+    Element line = hbox({
+        text(selected ? "▶ " : "  ") |
+            color(selected ? Color::Cyan : Color::GrayDark),
+        text(std::to_string(i + 1) + " ") | dim,
+        text(Ellipsize(entry.title, std::max(8, screen_.dimx() - 42))) |
+            style,
+        filler(),
+        text(kind) | dim,
+        text("  "),
+        text(entry.visible ? T("显示: 开", "Shown: on")
+                           : T("显示: 关", "Shown: off")) |
+            (entry.visible ? dim : color(Color::Red)),
+        text("  "),
+        text(entry.collapsed ? T("折叠: 是", "Collapsed: yes")
+                             : T("折叠: 否", "Collapsed: no")) |
+            (entry.collapsed ? dim : color(Color::GrayDark)),
+    });
+    if (selected) line = line | inverted;
+    lines.push_back(line);
+  }
+
+  lines.push_back(separator());
+  if (total > height) {
+    lines.push_back(text(std::to_string(topBarSettings_.selected + 1) + "/" +
+                         std::to_string(total)) |
+                    dim);
+  }
+  if (!topBarSettings_.message.empty()) {
+    lines.push_back(text(topBarSettings_.message) | color(Color::Yellow));
+  }
+  lines.push_back(
+      text(T("↑↓ 选择   Space 显示/隐藏   c 折叠   J/K 下移/上移   "
+             "Esc 返回",
+             "↑↓ select   Space show/hide   c collapse   J/K move down/up   "
+             "Esc back")) |
+      dim);
+  return vbox(std::move(lines)) | border;
+}
+
 Element App::HelpView() {
   std::vector<std::string> rows;
   auto add = [&](const std::string& line) { rows.push_back(line); };
@@ -3685,6 +3887,8 @@ Element App::HelpView() {
   add(T("  1-7              主页 / 新闻 / 联系 / 平台 / 搜索 / 论坛 / 我的",
         "  1-7              Home / News / Contact / Platform / Search / Forum / Me"));
   add(T("  Tab / Shift-Tab  切换标签", "  Tab / Shift-Tab  switch tabs"));
+  add(T("  ← / →            选择顶栏元素（Enter 打开）",
+        "  ← / →            select a top bar entry (Enter opens)"));
   add(T("  ?                打开 / 关闭帮助", "  ?                open / close help"));
   add(T("  s                设置", "  s                settings"));
   add(T("  P                插件动作", "  P                plugin actions"));
@@ -3799,6 +4003,13 @@ Element App::HelpView() {
           "an editor)"));
     add(T("  F5 / Ctrl-R      执行", "  F5 / Ctrl-R      run"));
     add(T("  Esc              返回动作列表", "  Esc              back to the action list"));
+  } else if (mode_ == Mode::TopBarSettings) {
+    section("[顶栏设置]", "[Top bar]");
+    add(T("  ↑↓ / j k         选择元素", "  ↑↓ / j k         select an entry"));
+    add(T("  Space / v        显示 / 隐藏", "  Space / v        show / hide"));
+    add(T("  c                收进 / 移出已折叠", "  c                collapse / expand"));
+    add(T("  J / K            下移 / 上移", "  J / K            move down / up"));
+    add(T("  Esc              返回设置", "  Esc              back to settings"));
   } else if (mode_ == Mode::LoginMenu) {
     section("[登录]", "[Sign-in]");
     add(T("  ↑↓ / j k         选择账号", "  ↑↓ / j k         select account"));
@@ -3916,6 +4127,50 @@ bool App::HandleEvent(Event event) {
     return true;
   }
 
+  if (topBarStripOpen_) {
+    std::vector<int> collapsed;
+    for (int i = 0; i < static_cast<int>(topBar_.size()); ++i) {
+      const TopBarEntry& entry = topBar_[static_cast<std::size_t>(i)];
+      if (entry.visible && entry.collapsed) collapsed.push_back(i);
+    }
+    if (collapsed.empty()) {
+      topBarStripOpen_ = false;
+      return true;
+    }
+    const int count = static_cast<int>(collapsed.size());
+    topBarStripSelected_ = std::clamp(topBarStripSelected_, 0, count - 1);
+    if (event == Event::Escape) {
+      topBarStripOpen_ = false;
+      return true;
+    }
+    if (event == Event::ArrowLeft || event == Event::Character('h')) {
+      topBarStripSelected_ = (topBarStripSelected_ + count - 1) % count;
+      return true;
+    }
+    if (event == Event::ArrowRight || event == Event::Character('l')) {
+      topBarStripSelected_ = (topBarStripSelected_ + 1) % count;
+      return true;
+    }
+    if (event == Event::Home) {
+      topBarStripSelected_ = 0;
+      return true;
+    }
+    if (event == Event::End) {
+      topBarStripSelected_ = count - 1;
+      return true;
+    }
+    if (event == Event::Return || event == Event::Character(' ')) {
+      const int index = collapsed[static_cast<std::size_t>(topBarStripSelected_)];
+      topBarCollapsedId_ = topBar_[static_cast<std::size_t>(index)].id;
+      topBarStripOpen_ = false;
+      topBarSelected_ = -1;
+      ActivateTopBarItem(index);
+      topBarSelected_ = -1;
+      return true;
+    }
+    return true;
+  }
+
   if (mode_ == Mode::HomeManage) {
     return HandleHomeManageKey(std::move(event));
   }
@@ -3958,6 +4213,9 @@ bool App::HandleEvent(Event event) {
   }
   if (mode_ == Mode::PluginForm) {
     return HandlePluginFormKey(std::move(event));
+  }
+  if (mode_ == Mode::TopBarSettings) {
+    return HandleTopBarSettingsKey(std::move(event));
   }
 
   if (help_) {
@@ -4077,6 +4335,32 @@ bool App::HandleEvent(Event event) {
   if (event == Event::TabReverse) {
     SwitchTab(static_cast<Tab>((static_cast<int>(tab_) + 6) % 7));
     return true;
+  }
+
+  if (mode_ == Mode::Browse) {
+    if (event == Event::ArrowLeft) {
+      topBarFocused_ = true;
+      MoveTopBarSelection(-1);
+      return true;
+    }
+    if (event == Event::ArrowRight) {
+      topBarFocused_ = true;
+      MoveTopBarSelection(1);
+      return true;
+    }
+    if (topBarFocused_) {
+      if (event == Event::Return || event == Event::Character(' ')) {
+        ActivateTopBarItem(topBarSelected_);
+        return true;
+      }
+      if (event == Event::Escape) {
+        topBarFocused_ = false;
+        return true;
+      }
+      // Any other key returns focus to the content; otherwise Enter would
+      // keep activating a top bar entry the user is no longer looking at.
+      topBarFocused_ = false;
+    }
   }
 
   if (tab_ == Tab::Home && mode_ == Mode::Browse) {
@@ -4304,11 +4588,12 @@ bool App::HandleSettingsMenuKey(Event event) {
   if (event == Event::Escape || event == Event::Character('q')) {
     mode_ = Mode::Browse;
     status_.clear();
+    EnsureVisibleTab();
     return true;
   }
   if (event == Event::ArrowUp || event == Event::Character('k') ||
       event == Event::ArrowDown || event == Event::Character('j')) {
-    settings_.selected = (settings_.selected + 1) % 3;
+    settings_.selected = (settings_.selected + 1) % 4;
     return true;
   }
   if (event == Event::Return || event == Event::Character(' ')) {
@@ -4320,8 +4605,10 @@ bool App::HandleSettingsMenuKey(Event event) {
       settings_.message =
           T("详情显示底层数据: ", "Show raw data in details: ") +
           (cfg_.showRawDetails ? T("开", "On") : T("关", "Off"));
-    } else {
+    } else if (settings_.selected == 2) {
       CycleUiLanguage();
+    } else {
+      OpenTopBarSettings();
     }
     return true;
   }
@@ -4402,6 +4689,256 @@ bool App::HandleInstanceSettingsKey(Event event) {
 }
 
 
+void App::RebuildTopBar() {
+  std::string selected_id;
+  const bool was_collapse = topBarSelected_ == -1;
+  if (topBarSelected_ >= 0 &&
+      topBarSelected_ < static_cast<int>(topBar_.size())) {
+    selected_id = topBar_[topBarSelected_].id;
+  }
+
+  struct PageDef {
+    const char* id;
+    Tab tab;
+    const char* zh;
+    const char* en;
+  };
+  static const PageDef kPages[] = {
+      {"home", Tab::Home, "主页", "Home"},
+      {"news", Tab::News, "新闻", "News"},
+      {"contact", Tab::Contact, "联系", "Contact"},
+      {"platform", Tab::Platform, "平台", "Platform"},
+      {"search", Tab::Search, "搜索", "Search"},
+      {"forum", Tab::Forum, "论坛", "Forum"},
+      {"me", Tab::Me, "我的", "Me"},
+  };
+
+  std::vector<TopBarSpec> specs;
+  std::vector<TopBarEntry> entries;
+  auto add = [&](TopBarEntry entry, bool default_visible,
+                 bool default_collapsed) {
+    specs.push_back({entry.id, default_visible, default_collapsed});
+    entries.push_back(std::move(entry));
+  };
+
+  for (const PageDef& def : kPages) {
+    TopBarEntry entry;
+    entry.id = std::string("page:") + def.id;
+    entry.title = T(def.zh, def.en);
+    entry.kind = TopBarEntry::Kind::Page;
+    entry.page = def.tab;
+    add(std::move(entry), true, false);
+  }
+
+  for (int i = 0; i < static_cast<int>(pluginActions_.size()); ++i) {
+    const PluginAction& action = pluginActions_[static_cast<std::size_t>(i)];
+    if (!PluginScopesAllow(action, cfg_.token.scopes)) continue;
+    TopBarEntry entry;
+    entry.id = "plugin:" + action.pluginId + ":" + action.id;
+    entry.title = action.title.empty() ? action.id : action.title;
+    entry.subtitle = action.pluginId;
+    for (const PluginInfo& info : plugins_.Plugins()) {
+      if (info.id == action.pluginId) {
+        entry.subtitle = info.name;
+        break;
+      }
+    }
+    entry.kind = TopBarEntry::Kind::PluginAction;
+    entry.action = i;
+    // Plugin actions stay out of the way until the user pins them.
+    add(std::move(entry), false, true);
+  }
+
+  const std::vector<TopBarState> states =
+      MergeTopBarStates(specs, cfg_.topBar);
+  topBar_.clear();
+  for (const TopBarState& state : states) {
+    const auto it = std::find_if(
+        entries.begin(), entries.end(),
+        [&](const TopBarEntry& entry) { return entry.id == state.id; });
+    if (it == entries.end()) continue;
+    TopBarEntry entry = *it;
+    entry.visible = state.visible;
+    entry.collapsed = state.collapsed;
+    topBar_.push_back(std::move(entry));
+  }
+
+  int selection = -1;
+  if (!selected_id.empty()) {
+    for (int i = 0; i < static_cast<int>(topBar_.size()); ++i) {
+      if (topBar_[i].id == selected_id) {
+        selection = i;
+        break;
+      }
+    }
+  }
+
+  const std::vector<int> bar = TopBarBarItems();
+  const bool has_collapsed =
+      std::find(bar.begin(), bar.end(), -1) != bar.end();
+  if (selection < 0 && !(was_collapse && has_collapsed)) {
+    for (int i = 0; i < static_cast<int>(topBar_.size()); ++i) {
+      if (topBar_[i].kind == TopBarEntry::Kind::Page &&
+          topBar_[i].page == tab_) {
+        selection = i;
+        break;
+      }
+    }
+  }
+  if (selection < 0 && !(was_collapse && has_collapsed)) {
+    selection = bar.empty() ? 0 : bar.front();
+  }
+  topBarSelected_ = (was_collapse && has_collapsed) ? -1 : selection;
+
+  bool collapse_id_valid = false;
+  for (const TopBarEntry& entry : topBar_) {
+    if (entry.id == topBarCollapsedId_ && entry.visible &&
+        entry.collapsed) {
+      collapse_id_valid = true;
+      break;
+    }
+  }
+  if (!collapse_id_valid) topBarCollapsedId_.clear();
+  if (topBarCollapsedId_.empty()) {
+    for (const TopBarEntry& entry : topBar_) {
+      if (entry.kind == TopBarEntry::Kind::Page && entry.page == tab_ &&
+          entry.visible && entry.collapsed) {
+        topBarCollapsedId_ = entry.id;
+        break;
+      }
+    }
+  }
+
+  int collapsed_count = 0;
+  for (const TopBarEntry& entry : topBar_) {
+    if (entry.visible && entry.collapsed) ++collapsed_count;
+  }
+  if (collapsed_count == 0) {
+    topBarStripOpen_ = false;
+    topBarStripSelected_ = 0;
+  } else {
+    topBarStripSelected_ =
+        std::clamp(topBarStripSelected_, 0, collapsed_count - 1);
+  }
+}
+
+std::vector<int> App::TopBarBarItems() const {
+  std::vector<int> items;
+  bool has_collapsed = false;
+  for (int i = 0; i < static_cast<int>(topBar_.size()); ++i) {
+    const TopBarEntry& entry = topBar_[static_cast<std::size_t>(i)];
+    if (!entry.visible) continue;
+    if (entry.collapsed) {
+      has_collapsed = true;
+    } else {
+      items.push_back(i);
+    }
+  }
+  if (has_collapsed) items.push_back(-1);
+  return items;
+}
+
+std::string App::TopBarCollapseLabel() const {
+  for (const TopBarEntry& entry : topBar_) {
+    if (entry.id == topBarCollapsedId_ && entry.visible &&
+        entry.collapsed) {
+      return entry.title;
+    }
+  }
+  return T("已折叠", "Collapsed");
+}
+
+void App::MoveTopBarSelection(int delta) {
+  const std::vector<int> items = TopBarBarItems();
+  if (items.empty()) return;
+  const auto it = std::find(items.begin(), items.end(), topBarSelected_);
+  int position = it == items.end()
+                     ? 0
+                     : static_cast<int>(std::distance(items.begin(), it));
+  const int count = static_cast<int>(items.size());
+  position = (position + delta + count) % count;
+  topBarSelected_ = items[static_cast<std::size_t>(position)];
+}
+
+void App::ActivateTopBarItem(int index) {
+  topBarFocused_ = false;
+  if (index == -1) {
+    int collapsed_count = 0;
+    int selected = 0;
+    for (int i = 0; i < static_cast<int>(topBar_.size()); ++i) {
+      const TopBarEntry& entry = topBar_[static_cast<std::size_t>(i)];
+      if (!entry.visible || !entry.collapsed) continue;
+      if (entry.id == topBarCollapsedId_) selected = collapsed_count;
+      ++collapsed_count;
+    }
+    if (collapsed_count == 0) return;
+    topBarStripSelected_ = selected;
+    topBarStripOpen_ = true;
+    return;
+  }
+  if (index < 0 || index >= static_cast<int>(topBar_.size())) return;
+  TopBarEntry& entry = topBar_[static_cast<std::size_t>(index)];
+  if (entry.kind == TopBarEntry::Kind::Page) {
+    SwitchTab(entry.page);
+    topBarSelected_ = index;
+    return;
+  }
+  if (entry.action >= 0 &&
+      entry.action < static_cast<int>(pluginActions_.size())) {
+    OpenPluginActionFromTopBar(entry.action);
+  }
+}
+
+void App::OpenPluginActionFromTopBar(int index) {
+  OpenPluginAction(index);
+  pluginForm_.from_topbar = true;
+}
+
+void App::SaveTopBarPrefs() {
+  std::vector<TopBarState> states;
+  states.reserve(topBar_.size());
+  for (const TopBarEntry& entry : topBar_) {
+    states.push_back({entry.id, entry.visible, entry.collapsed});
+  }
+  cfg_.topBar = TopBarPrefsFromStates(states);
+  SaveConfig();
+}
+
+void App::EnsureVisibleTab() {
+  bool hidden = false;
+  for (const TopBarEntry& entry : topBar_) {
+    if (entry.kind == TopBarEntry::Kind::Page && entry.page == tab_) {
+      hidden = !entry.visible;
+      break;
+    }
+  }
+  if (!hidden) return;
+  for (const TopBarEntry& entry : topBar_) {
+    if (entry.kind == TopBarEntry::Kind::Page && entry.visible) {
+      SwitchTab(entry.page);
+      return;
+    }
+  }
+}
+
+void App::OpenTopBarSettings() {
+  RebuildTopBar();
+  topBarSettings_ = TopBarSettingsState{};
+  if (!topBar_.empty()) {
+    int selected = 0;
+    for (int i = 0; i < static_cast<int>(topBar_.size()); ++i) {
+      if (topBar_[i].kind == TopBarEntry::Kind::Page &&
+          topBar_[i].page == tab_) {
+        selected = i;
+        break;
+      }
+    }
+    topBarSettings_.selected = selected;
+  }
+  mode_ = Mode::TopBarSettings;
+  status_.clear();
+}
+
 void App::OpenPlugins() {
   RefreshVisiblePluginActions();
   pluginMenu_ = PluginMenuState{};
@@ -4472,7 +5009,7 @@ void App::RunPluginAction() {
       }
       const std::string message = result.value("message", std::string{});
       const std::string refresh = result.value("refresh", std::string{});
-      mode_ = Mode::PluginMenu;
+      mode_ = pluginForm_.from_topbar ? Mode::Browse : Mode::PluginMenu;
       SetStatus(message.empty() ? T("完成", "Done") : message);
       ApplyPluginRefresh(refresh);
     });
@@ -4545,7 +5082,7 @@ bool App::HandlePluginMenuKey(Event event) {
 
 bool App::HandlePluginFormKey(Event event) {
   if (event == Event::Escape) {
-    mode_ = Mode::PluginMenu;
+    mode_ = pluginForm_.from_topbar ? Mode::Browse : Mode::PluginMenu;
     pluginForm_.message.clear();
     return true;
   }
@@ -4646,6 +5183,67 @@ bool App::HandlePluginFormKey(Event event) {
       value.insert(cursor, character);
       cursor += character.size();
     }
+  }
+  return true;
+}
+
+bool App::HandleTopBarSettingsKey(Event event) {
+  if (event == Event::Escape) {
+    mode_ = Mode::Settings;
+    return true;
+  }
+  if (topBar_.empty()) return true;
+
+  const int count = static_cast<int>(topBar_.size());
+  if (event == Event::ArrowUp || event == Event::Character('k')) {
+    topBarSettings_.selected = (topBarSettings_.selected + count - 1) % count;
+    return true;
+  }
+  if (event == Event::ArrowDown || event == Event::Character('j')) {
+    topBarSettings_.selected = (topBarSettings_.selected + 1) % count;
+    return true;
+  }
+  if (event == Event::Home) {
+    topBarSettings_.selected = 0;
+    return true;
+  }
+  if (event == Event::End) {
+    topBarSettings_.selected = count - 1;
+    return true;
+  }
+
+  TopBarEntry& entry =
+      topBar_[static_cast<std::size_t>(topBarSettings_.selected)];
+  if (event == Event::Character(' ') || event == Event::Character('v')) {
+    entry.visible = !entry.visible;
+    if (!entry.visible || !entry.collapsed) {
+      if (entry.id == topBarCollapsedId_) topBarCollapsedId_.clear();
+    }
+    SaveTopBarPrefs();
+    topBarSettings_.message = T("已保存", "Saved");
+    return true;
+  }
+  if (event == Event::Character('c')) {
+    entry.collapsed = !entry.collapsed;
+    if (!entry.collapsed && entry.id == topBarCollapsedId_) {
+      topBarCollapsedId_.clear();
+    }
+    SaveTopBarPrefs();
+    topBarSettings_.message = T("已保存", "Saved");
+    return true;
+  }
+  if (event == Event::Character('J') || event == Event::Character('K')) {
+    const int direction = event == Event::Character('J') ? 1 : -1;
+    const int target = topBarSettings_.selected + direction;
+    if (target >= 0 && target < count) {
+      std::swap(topBar_[static_cast<std::size_t>(topBarSettings_.selected)],
+                topBar_[static_cast<std::size_t>(target)]);
+      topBarSettings_.selected = target;
+      topBarSelected_ = target;
+      SaveTopBarPrefs();
+      topBarSettings_.message = T("顺序已保存", "Order saved");
+    }
+    return true;
   }
   return true;
 }

@@ -502,6 +502,8 @@ sudo apt install ./sparkapp-plugin-news_*.deb
 │   ├── forum/        # Flarum JSON:API 客户端、解析与文本渲染
 │   ├── ui/           # FTXUI 界面与线程池
 │   ├── config.*      # TOML 配置与令牌存储
+│   ├── topbar.*      # 顶栏条目的合并、顺序与持久化
+│   ├── plugin/       # 可选插件的 C ABI、SDK 与加载器
 │   ├── service_source.*  # 服务源抓取 / 解析 / 地址同步
 │   ├── options.*     # 命令行参数
 │   ├── util.*        # UTF-8 / 换行 / URL 工具
@@ -522,8 +524,10 @@ GTK / GNOME 前端设计、GUI/TUI 启动检测、libadwaita 主题和打包方�
 
 可选插件（新闻管理、论坛管理等）以 `sparkapp-plugin-*` 独立包安装，运行时
 由 `spark_core` 的 C ABI 动态加载；前端包不依赖任何插件。TUI 中按 `P` 打开
-插件动作列表；GTK 在至少一个动作可用时显示“插件”页。插件接口、动作模型和
-安全边界见 [`dev-docs/PLUGINS.md`](dev-docs/PLUGINS.md)。
+插件动作列表；GTK 在至少一个动作可用时显示“插件”页。插件动作可以固定到
+顶栏（设置 → 顶栏元素）。插件接口、动作模型和安全边界见
+[`dev-docs/PLUGINS.md`](dev-docs/PLUGINS.md)，顶栏配置与两端交互见
+[`dev-docs/TOPBAR.md`](dev-docs/TOPBAR.md)。
 
 ## API 文档
 

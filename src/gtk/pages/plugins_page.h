@@ -24,7 +24,6 @@ class PluginsPage : public Page {
 
  private:
   void Build();
-  void ShowAction(const PluginAction& action);
 
   static void OnActionActivated(AdwActionRow* row, gpointer data);
 
@@ -33,6 +32,10 @@ class PluginsPage : public Page {
   std::vector<PluginAction> actions_;
   GtkWidget* root_ = nullptr;
 };
+
+// Opens the generic action form as a modal dialog owned by `parent`.
+void ShowPluginActionDialog(const PageContext& ctx, const PluginAction& action,
+                            GtkWidget* parent);
 
 // True when at least one action is visible for the token's scopes.
 bool HasVisiblePluginActions(const PageContext& ctx);

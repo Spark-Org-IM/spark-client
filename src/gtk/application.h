@@ -38,9 +38,46 @@ class Application {
   void Toast(const std::string& message);
   void ShowSettings();
   void ShowAbout();
+  void ShowTopBarSettings();
+
+  struct TopBarItem {
+    enum class Kind { Page, PluginAction };
+    std::string id;
+    std::string title;
+    std::string subtitle;
+    Kind kind = Kind::Page;
+    std::string pageId;
+    int action = -1;  // index into pluginActions_
+    bool visible = true;
+    bool collapsed = false;
+  };
+
+  void RebuildTopBarItems();
+  void SaveTopBarPrefs();
+  void RebuildSidebarLists();
+  void FillTopBarSettingsList();
+  void ShowSidebarCollapsed(bool collapsed);
+  void UpdateCollapseLabel();
+  void SelectSidebarPage(const std::string& pageId);
+  void ActivateTopBarId(const std::string& id);
+  bool PageIsVisible(const std::string& pageId) const;
+  std::string FirstVisiblePage() const;
+  GtkWidget* MakeTopBarRow(const TopBarItem& item);
+  GtkWidget* MakeCollapseRow();
 
   static void OnRowActivated(GtkListBox* box, GtkListBoxRow* row,
                              gpointer data);
+  static void OnCollapsedRowActivated(GtkListBox* box, GtkListBoxRow* row,
+                                      gpointer data);
+  static void OnCollapseRowActivated(GtkListBox* box, GtkListBoxRow* row,
+                                     gpointer data);
+  static void OnSidebarBack(GtkButton* button, gpointer data);
+  static void OnTopBarSettings(GtkWidget* row, gpointer data);
+  static void OnTopBarVisible(GObject* object, GParamSpec* spec,
+                              gpointer data);
+  static void OnTopBarCollapsed(GObject* object, GParamSpec* spec,
+                                gpointer data);
+  static void OnTopBarMove(GtkButton* button, gpointer data);
   static void OnSettings(GSimpleAction* action, GVariant* parameter,
                          gpointer data);
   static void OnAbout(GSimpleAction* action, GVariant* parameter,
@@ -62,6 +99,8 @@ class Application {
   ForumClient forum_;
   PluginHost plugins_;
   std::vector<std::unique_ptr<Page>> pages_;
+  std::vector<PluginAction> pluginActions_;
+  std::vector<TopBarItem> topbar_;
   std::unique_ptr<Worker> worker_;
   std::atomic<bool> running_{true};
 
@@ -71,8 +110,17 @@ class Application {
   GtkWidget* split_ = nullptr;
   GtkWidget* sidebar_button_ = nullptr;
   GtkWidget* stack_ = nullptr;
-  GtkWidget* list_ = nullptr;
+  GtkWidget* sidebar_stack_ = nullptr;
+  GtkWidget* sidebar_main_list_ = nullptr;
+  GtkWidget* sidebar_collapsed_list_ = nullptr;
+  GtkWidget* sidebar_collapsed_page_ = nullptr;
+  GtkWidget* sidebar_collapse_row_ = nullptr;
+  GtkWidget* sidebar_collapse_label_ = nullptr;
+  GtkWidget* topbar_settings_list_ = nullptr;
+  GtkWidget* settings_window_ = nullptr;
   GtkWidget* toast_overlay_ = nullptr;
+  bool sidebar_collapsed_ = false;
+  std::string last_collapsed_id_;
   std::string current_page_ = "home";
 };
 

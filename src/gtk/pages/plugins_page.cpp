@@ -224,12 +224,14 @@ void PluginsPage::OnActionActivated(AdwActionRow* row, gpointer data) {
   const int index =
       GPOINTER_TO_INT(g_object_get_data(G_OBJECT(row), "action-index")) - 1;
   if (index < 0 || index >= static_cast<int>(self->actions_.size())) return;
-  self->ShowAction(self->actions_[index]);
+  ShowPluginActionDialog(self->ctx_, self->actions_[index],
+                         GTK_WIDGET(gtk_widget_get_root(self->root_)));
 }
 
-void PluginsPage::ShowAction(const PluginAction& action) {
+void ShowPluginActionDialog(const PageContext& ctx, const PluginAction& action,
+                            GtkWidget* parent) {
   StatePtr state = std::make_shared<FormState>();
-  state->ctx = ctx_;
+  state->ctx = ctx;
   state->action = action;
 
   AdwDialog* dialog = ADW_DIALOG(adw_dialog_new());
@@ -239,7 +241,7 @@ void PluginsPage::ShowAction(const PluginAction& action) {
 
   AdwToolbarView* toolbar = ADW_TOOLBAR_VIEW(adw_toolbar_view_new());
   AdwHeaderBar* header = ADW_HEADER_BAR(adw_header_bar_new());
-  state->run = gtk_button_new_with_label(T(ctx_, "执行", "Run").c_str());
+  state->run = gtk_button_new_with_label(T(ctx, "执行", "Run").c_str());
   gtk_widget_add_css_class(state->run, "suggested-action");
   adw_header_bar_pack_end(header, state->run);
   adw_toolbar_view_add_top_bar(toolbar, GTK_WIDGET(header));
@@ -286,7 +288,7 @@ void PluginsPage::ShowAction(const PluginAction& action) {
       });
   g_signal_connect(state->run, "clicked", G_CALLBACK(OnRunClicked), nullptr);
 
-  adw_dialog_present(dialog, GTK_WIDGET(gtk_widget_get_root(root_)));
+  adw_dialog_present(dialog, parent);
 }
 
 }  // namespace spark::gtk

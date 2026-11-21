@@ -54,6 +54,7 @@ class App {
     SourceReview,      // review source changes + token probes
     PluginMenu,        // optional plugin action list
     PluginForm,        // field form for one plugin action
+    TopBarSettings,    // visibility / collapsed / order of top bar entries
   };
 
   enum class ForumAction {
@@ -218,8 +219,26 @@ class App {
     std::vector<std::string> values;
     std::vector<std::size_t> cursors;
     bool busy = false;
+    bool from_topbar = false;
     std::string message;
     int generation = 0;
+  };
+
+  struct TopBarEntry {
+    enum class Kind { Page, PluginAction };
+    std::string id;
+    std::string title;
+    std::string subtitle;
+    Kind kind = Kind::Page;
+    Tab page = Tab::Home;
+    int action = -1;  // index into pluginActions_
+    bool visible = true;
+    bool collapsed = false;
+  };
+
+  struct TopBarSettingsState {
+    int selected = 0;
+    std::string message;
   };
 
   struct SettingsState {
@@ -306,10 +325,19 @@ class App {
   void OpenInstanceSettings();
   void OpenPlugins();
   void OpenPluginAction(int index);
+  void OpenPluginActionFromTopBar(int index);
   void RunPluginAction();
   void ApplyPluginRefresh(const std::string& target);
+  void RebuildTopBar();
+  void SaveTopBarPrefs();
+  void OpenTopBarSettings();
+  std::vector<int> TopBarBarItems() const;
+  std::string TopBarCollapseLabel() const;
+  void MoveTopBarSelection(int delta);
+  void ActivateTopBarItem(int index);
   void RefreshVisiblePluginActions();
   bool PluginActionAllowed(const PluginAction& action) const;
+  void EnsureVisibleTab();
   bool SaveSettings();
   void SyncNow();
   void ApplyInstanceChange();
@@ -355,6 +383,8 @@ class App {
   ftxui::Element InstanceSettingsView();
   ftxui::Element PluginMenuView();
   ftxui::Element PluginFormView();
+  ftxui::Element TopBarStrip();
+  ftxui::Element TopBarSettingsView();
   ftxui::Element HelpView();
 
   // Events ------------------------------------------------------------------
@@ -372,6 +402,7 @@ class App {
   bool HandleInstanceSettingsKey(ftxui::Event event);
   bool HandlePluginMenuKey(ftxui::Event event);
   bool HandlePluginFormKey(ftxui::Event event);
+  bool HandleTopBarSettingsKey(ftxui::Event event);
   std::string& SettingsField();
 
   Options opts_;
@@ -428,6 +459,13 @@ class App {
   PluginMenuState pluginMenu_;
   PluginFormState pluginForm_;
   std::vector<PluginAction> pluginActions_;
+  std::vector<TopBarEntry> topBar_;
+  int topBarSelected_ = 0;  // index into topBar_, or -1 for the collapsed item
+  bool topBarFocused_ = false;
+  bool topBarStripOpen_ = false;
+  int topBarStripSelected_ = 0;
+  std::string topBarCollapsedId_;
+  TopBarSettingsState topBarSettings_;
   std::vector<int> visiblePluginActions_;  // indexes into pluginActions_
 
   // Bumped whenever the user saves instance settings; a startup sync that

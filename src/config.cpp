@@ -193,6 +193,26 @@ Config Config::Load(const std::string& path) {
     }
   }
 
+  if (const toml::table* topbar = root["topbar"].as_table()) {
+    if (const toml::array* items = (*topbar)["items"].as_array()) {
+      for (const auto& node : *items) {
+        const toml::table* item = node.as_table();
+        if (item == nullptr) continue;
+        TopBarPref pref;
+        if (const auto id = (*item)["id"].value<std::string>()) {
+          pref.id = *id;
+        }
+        if (const auto visible = (*item)["visible"].value<bool>()) {
+          pref.visible = *visible;
+        }
+        if (const auto collapsed = (*item)["collapsed"].value<bool>()) {
+          pref.collapsed = *collapsed;
+        }
+        if (!pref.id.empty()) cfg.topBar.push_back(std::move(pref));
+      }
+    }
+  }
+
   if (const toml::table* forum = root["forum"].as_table()) {
     if (const auto token = ReadText(*forum, "token")) {
       cfg.forum.token = *token;
@@ -255,6 +275,20 @@ bool Config::Save() const {
       auth.insert_or_assign("scopes", std::move(scopes));
     }
     root.insert_or_assign("auth", std::move(auth));
+  }
+
+  if (!topBar.empty()) {
+    toml::array items;
+    for (const TopBarPref& pref : topBar) {
+      toml::table item;
+      item.insert_or_assign("id", pref.id);
+      item.insert_or_assign("visible", pref.visible);
+      item.insert_or_assign("collapsed", pref.collapsed);
+      items.push_back(std::move(item));
+    }
+    toml::table topbar;
+    topbar.insert_or_assign("items", std::move(items));
+    root.insert_or_assign("topbar", std::move(topbar));
   }
 
   if (!forum.Empty()) {

@@ -333,9 +333,12 @@ jobs:
               "dist/spark-client_${version}_linux-${arch}.tar.gz" "${folder}"
           done
 
-          # Source package and its metadata.
+          # Everything: both architectures' debs plus the source package.
           folder="spark-client-${version}-all"
-          mkdir -p "dist/${folder}/source"
+          mkdir -p "dist/${folder}/amd64" "dist/${folder}/arm64" \
+                   "dist/${folder}/source"
+          cp dist/*_amd64.deb "dist/${folder}/amd64/"
+          cp dist/*_arm64.deb "dist/${folder}/arm64/"
           cp dist/*.dsc dist/*.tar.xz dist/*.changes dist/*.buildinfo \
              "dist/${folder}/source/"
           cp README.md LICENSE "dist/${folder}/"

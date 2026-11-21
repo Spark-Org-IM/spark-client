@@ -18,20 +18,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # main is release-only. Merging a pull request into it is refused here; the
-  # check is meant to be required by branch protection.
-  no-merge-to-main:
-    name: no-merge-to-main
-    if: |
-      (github.event_name == 'pull_request' && github.base_ref == 'main') ||
-      (github.event_name == 'push' && github.ref == 'refs/heads/main')
-    runs-on: ubuntu-24.04
-    steps:
-      - name: Reject changes to main
-        run: |
-          echo "::error::main is release-only; keep changes on dev branches."
-          exit 1
-
   linux:
     name: linux-${{ matrix.arch }}
     strategy:

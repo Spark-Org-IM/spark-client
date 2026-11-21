@@ -14,6 +14,16 @@ set(SPARK_TUI_PACKAGE_VERSION "${SPARK_TUI_VERSION_LINE}"
     CACHE STRING "spark-client package version" FORCE)
 project(spark-client VERSION ${SPARK_TUI_PROJECT_VERSION} LANGUAGES CXX)
 
+# Keep the packaged ABI marker in sync with the C header plugins compile
+# against. Out-of-tree plugin packages depend on spark-plugin-abi-<N>.
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/src/plugin/api.h"
+     _spark_plugin_abi_line REGEX "^#define SPARK_PLUGIN_ABI_VERSION ")
+string(REGEX MATCH "[0-9]+" SPARK_PLUGIN_ABI_VERSION
+       "${_spark_plugin_abi_line}")
+if(NOT SPARK_PLUGIN_ABI_VERSION)
+  message(FATAL_ERROR "cannot read SPARK_PLUGIN_ABI_VERSION from plugin/api.h")
+endif()
+
 # Build-tree binaries are copied into the standalone Linux tarball, so their
 # rpath must not contain an absolute build directory. With this option CMake
 # rewrites it to $ORIGIN, which is valid both in the build tree and in the
@@ -38,7 +48,6 @@ include(FetchContent)
 
 option(SPARK_TUI_BUILD_TESTS       "Build the unit tests"          ON)
 option(SPARK_TUI_BUILD_GTK         "Build the GTK4/libadwaita frontend" OFF)
-option(SPARK_TUI_BUILD_PLUGINS     "Build the optional admin plugins" OFF)
 option(SPARK_TUI_USE_SYSTEM_FTXUI  "Require a system-installed FTXUI (no fetch)" OFF)
 option(SPARK_TUI_USE_SYSTEM_JSON   "Use system nlohmann_json"      OFF)
 option(SPARK_TUI_USE_SYSTEM_HTTPLIB "Use system cpp-httplib"       OFF)
@@ -236,27 +245,18 @@ if(SPARK_TUI_BUILD_GTK)
 endif()
 
 # ---------------------------------------------------------------------------
-# Optional plugins
+# Plugin SDK
 #
-# Plugins are separate shared objects loaded at runtime. They only use the C
-# ABI in plugin/api.h, never link spark_core or GTK/FTXUI, and are packaged on
-# their own so a normal TUI/GUI install never pulls them in.
+# The host only loads plugins. Official and third-party plugins are built in
+# their own projects and are never part of this build or its packages. Install
+# the header-only SDK so those projects can compile against the stable C ABI
+# without carrying a copy of the host sources.
 # ---------------------------------------------------------------------------
-if(SPARK_TUI_BUILD_PLUGINS AND NOT WIN32)
-  add_library(spark-plugin-news-admin MODULE
-    plugins/news_admin/news_admin.cpp)
-  target_include_directories(spark-plugin-news-admin PRIVATE
-    "${CMAKE_CURRENT_SOURCE_DIR}/src"
-    "${CMAKE_CURRENT_SOURCE_DIR}/third_party")
-  target_compile_options(spark-plugin-news-admin PRIVATE
-    ${SPARK_TUI_WARNING_FLAGS})
-  set_target_properties(spark-plugin-news-admin PROPERTIES
-    PREFIX ""
-    OUTPUT_NAME "spark_news_admin")
-  install(TARGETS spark-plugin-news-admin
-          LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}/spark-client/plugins"
-          COMPONENT plugin-news)
-endif()
+install(FILES
+          src/plugin/api.h
+          src/plugin/sdk.h
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/spark-client/plugin"
+        COMPONENT core)
 
 # ---------------------------------------------------------------------------
 # Install
@@ -290,12 +290,11 @@ if(SPARK_TUI_BUILD_TESTS)
   target_compile_options(spark-tui-tests PRIVATE ${SPARK_TUI_WARNING_FLAGS})
   add_test(NAME spark-tui-tests COMMAND spark-tui-tests)
 
-  if(SPARK_TUI_BUILD_PLUGINS AND NOT WIN32)
+  if(NOT WIN32)
     add_executable(spark-plugin-tests tests/test_plugin.cpp)
     target_link_libraries(spark-plugin-tests PRIVATE spark_core)
     target_compile_options(spark-plugin-tests PRIVATE ${SPARK_TUI_WARNING_FLAGS})
-    add_test(NAME spark-plugin-tests COMMAND spark-plugin-tests
-             "$<TARGET_FILE_DIR:spark-plugin-news-admin>")
+    add_test(NAME spark-plugin-tests COMMAND spark-plugin-tests)
   endif()
 endif()
 
@@ -327,24 +326,19 @@ if(SPARK_TUI_BUILD_GTK)
   set(CPACK_COMPONENT_GUI_DESCRIPTION
       "GTK4 / libadwaita frontend for Spark ORG news, contacts, platforms and the Flarum forum.")
 endif()
-if(SPARK_TUI_BUILD_PLUGINS AND NOT WIN32)
-  list(APPEND _spark_tui_components plugin-news)
-  set(CPACK_COMPONENT_PLUGIN-NEWS_DESCRIPTION
-      "Optional plugin with news editing, deletion and home-page pick management.")
-endif()
 set(CPACK_COMPONENTS_ALL ${_spark_tui_components})
 set(CPACK_DEBIAN_CORE_PACKAGE_NAME "sparkapp-core")
 set(CPACK_DEBIAN_TUI_PACKAGE_NAME  "sparkapp-tui")
 set(CPACK_DEBIAN_GUI_PACKAGE_NAME  "sparkapp-gui")
-set(CPACK_DEBIAN_PLUGIN-NEWS_PACKAGE_NAME "sparkapp-plugin-news")
 # All binary packages come from the spark-client source package; reprepro
 # rejects a binary whose Source does not match the .dsc.
 set(CPACK_DEBIAN_CORE_PACKAGE_SOURCE "spark-client")
 set(CPACK_DEBIAN_TUI_PACKAGE_SOURCE  "spark-client")
 set(CPACK_DEBIAN_GUI_PACKAGE_SOURCE  "spark-client")
-if(SPARK_TUI_BUILD_PLUGINS AND NOT WIN32)
-  set(CPACK_DEBIAN_PLUGIN-NEWS_PACKAGE_SOURCE "spark-client")
-endif()
+# Plugins are separate packages from separate sources. They depend on this
+# virtual package instead of an exact core version, so the ABI version decides
+# compatibility and plugin releases can move independently.
+set(CPACK_DEBIAN_CORE_PACKAGE_PROVIDES "spark-plugin-abi-${SPARK_PLUGIN_ABI_VERSION}")
 
 if(SPARK_TUI_DEB_SHLIBDEPS)
   set(CPACK_DEBIAN_CORE_PACKAGE_SHLIBDEPS ON)
@@ -353,11 +347,6 @@ if(SPARK_TUI_DEB_SHLIBDEPS)
   if(SPARK_TUI_BUILD_GTK)
     set(CPACK_DEBIAN_GUI_PACKAGE_DEPENDS
         "sparkapp-core (= ${CPACK_PACKAGE_VERSION}), libgtk-4-1, libadwaita-1-0, libc6, libstdc++6")
-  endif()
-  if(SPARK_TUI_BUILD_PLUGINS AND NOT WIN32)
-    set(CPACK_DEBIAN_PLUGIN-NEWS_PACKAGE_SHLIBDEPS OFF)
-    set(CPACK_DEBIAN_PLUGIN-NEWS_PACKAGE_DEPENDS
-        "sparkapp-core (= ${CPACK_PACKAGE_VERSION}), libc6, libstdc++6")
   endif()
   set(_spark_tui_depends "sparkapp-core (= ${CPACK_PACKAGE_VERSION}), libc6, libstdc++6")
   if(SPARK_TUI_FTXUI_FROM_SYSTEM)
@@ -373,11 +362,6 @@ else()
   if(SPARK_TUI_BUILD_GTK)
     set(CPACK_DEBIAN_GUI_PACKAGE_DEPENDS
         "sparkapp-core (= ${CPACK_PACKAGE_VERSION}), libgtk-4-1, libadwaita-1-0, libc6, libstdc++6")
-  endif()
-  if(SPARK_TUI_BUILD_PLUGINS AND NOT WIN32)
-    set(CPACK_DEBIAN_PLUGIN-NEWS_PACKAGE_SHLIBDEPS OFF)
-    set(CPACK_DEBIAN_PLUGIN-NEWS_PACKAGE_DEPENDS
-        "sparkapp-core (= ${CPACK_PACKAGE_VERSION}), libc6, libstdc++6")
   endif()
   set(CPACK_DEBIAN_CORE_PACKAGE_DEPENDS
       "libc6, libstdc++6, libssl3t64 | libssl3")

@@ -126,18 +126,28 @@ TUI 会清掉对应缓存并在当前页重新加载。
 
 ## 6. 构建与打包
 
+插件**不在本项目里构建**，也不属于 `spark-client` 的源码包或发布产物。官方插件
+放在独立项目 `spark-client-plugins`，第三方插件同样各自构建：
+
 ```bash
-cmake -S . -B build -DSPARK_TUI_BUILD_PLUGINS=ON
+cmake -S ~/Projects/spark-client-plugins -B build \
+  -DSPARK_PLUGIN_SDK_INCLUDE_DIR=/path/to/spark-client/src
 cmake --build build
+ctest --test-dir build --output-on-failure
 ```
 
-- 插件目标默认关闭；
-- 每个插件一个 `.deb`，例如 `sparkapp-plugin-news`，只依赖
-  `sparkapp-core (= 版本)`；
-- `sparkapp-tui` / `sparkapp-gui` **不依赖**插件，最多在文档里提示；
-- 插件包安装到 `<libdir>/spark-client/plugins/`，和前端包完全解耦。
+- 插件只使用 `plugin/api.h` / `plugin/sdk.h`，不链接 `spark_core`、GTK 或 FTXUI；
+- 主项目安装 SDK 头文件到 `/usr/include/spark-client/plugin/`，并在
+  `sparkapp-core` 上提供 `spark-plugin-abi-<N>` 虚拟包（`N` 即
+  `SPARK_PLUGIN_ABI_VERSION`）；
+- 插件包自己声明依赖 `spark-plugin-abi-<N>`，ABI 变化后旧插件不会被错误安装；
+- `sparkapp-tui` / `sparkapp-gui` **不依赖**任何插件；
+- 插件安装到 `<libdir>/spark-client/plugins/`。
 
-加载器本身也支持 Windows（`.dll` + `LoadLibrary`）；示例插件和 Debian 包目前
-只在 Linux 构建。
+官方插件：
 
-当前示例：`plugins/news_admin/`（新闻保存/删除、主页置顶增删）。
+- `plugins/manage-news`：新闻保存/删除、主页置顶增删；
+- `plugins/manage-forum`：主题发布、回复、修改（置顶/锁定/隐藏）、删除。
+
+加载器本身也支持 Windows（`.dll` + `LoadLibrary`）；插件和 SDK 测试目前只在
+Linux 构建。

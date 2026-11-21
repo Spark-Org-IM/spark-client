@@ -478,12 +478,13 @@ cd build && cpack -G DEB
 sudo apt install ./sparkapp-core_*.deb ./sparkapp-tui_*.deb
 # 图形
 sudo apt install ./sparkapp-core_*.deb ./sparkapp-gui_*.deb
-# 可选插件（不装不影响 TUI / GUI）
-sudo apt install ./sparkapp-plugin-news_*.deb
+# 可选插件由独立项目构建，不随本项目的发布包提供
 ```
 
-插件默认不构建。需要示例插件时在配置阶段加 `-DSPARK_TUI_BUILD_PLUGINS=ON`，
-它会生成独立的 `sparkapp-plugin-news` 包，只依赖同版本的 `sparkapp-core`。
+插件**不在本项目里构建**。官方插件（新闻管理、论坛管理）在独立项目
+`spark-client-plugins` 中，第三方插件也各自单独构建；主项目只安装 SDK 头文件
+并提供 `spark-plugin-abi-<N>` 虚拟包。构建方法见
+[`dev-docs/PLUGINS.md`](dev-docs/PLUGINS.md#6-构建与打包)。
 
 依赖计算：
 

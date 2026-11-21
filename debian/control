@@ -14,10 +14,13 @@ Package: sparkapp-core
 Architecture: any
 Section: libs
 Depends: ${shlibs:Depends}, ${misc:Depends}
+Provides: spark-plugin-abi-1
 Description: shared core library and launcher for Spark ORG clients
  Common configuration, Spark ORG API, Flarum API and service-source logic
  used by the Spark ORG terminal and GTK frontends, plus the spark-client
  launcher which starts the frontend that matches the current session.
+ It also ships the header-only plugin SDK; plugins are separate packages
+ built by their own projects.
 
 Package: sparkapp-tui
 Architecture: any
@@ -36,12 +39,3 @@ Description: Spark ORG GTK client
  A GTK4 / libadwaita client for Spark ORG news, contacts, platforms and
  the Flarum forum. It follows the system theme, dark mode, accent color
  and high-contrast settings.
-
-Package: sparkapp-plugin-news
-Architecture: any
-Section: utils
-Depends: sparkapp-core (= ${binary:Version}), ${shlibs:Depends}, ${misc:Depends}
-Description: Spark ORG news management plugin
- Optional plugin for the Spark ORG clients. Adds news editing, deletion
- and home-page pick management actions. Requests are proxied by the
- client, so the plugin never receives account tokens.

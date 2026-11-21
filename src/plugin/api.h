@@ -66,7 +66,7 @@ typedef struct spark_plugin_api {
   spark_plugin* (*create)(const spark_host_api* host);
   void (*destroy)(spark_plugin* plugin);
 
-  // {"id":"news-admin","name":"...","version":"0.1.0"}
+  // {"id":"manage-news","name":"...","version":"0.1.0"}
   char* (*info_json)(spark_plugin* plugin);
   // JSON array of action descriptors:
   // [{"id":"save-news","title":"...","description":"...",

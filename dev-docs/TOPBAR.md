@@ -31,7 +31,7 @@ visible = true
 collapsed = false
 
 [[topbar.items]]
-id = "plugin:news-admin:save-news"
+id = "plugin:manage-news:save-news"
 visible = true
 collapsed = false
 ```

@@ -255,7 +255,7 @@ int main() {
     cfg.token.scopes = {"news.edit", "profile.write"};
     cfg.topBar = {{"page:home", true, false},
                   {"page:news", true, true},
-                  {"plugin:news-admin:save-news", false, true}};
+                  {"plugin:manage-news:save-news", false, true}};
     cfg.forum.token = "flarum_test";
     cfg.forum.userId = "2";
     cfg.forum.username = "hoewllo";
@@ -297,7 +297,7 @@ int main() {
     CHECK(loaded.topBar[0].id == "page:home");
     CHECK(loaded.topBar[1].id == "page:news");
     CHECK(loaded.topBar[1].collapsed);
-    CHECK(loaded.topBar[2].id == "plugin:news-admin:save-news");
+    CHECK(loaded.topBar[2].id == "plugin:manage-news:save-news");
     CHECK(!loaded.topBar[2].visible);
     CHECK(loaded.topBar[2].collapsed);
     CHECK(loaded.forum.token == "flarum_test");

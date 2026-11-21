@@ -1,5 +1,8 @@
+#include <unistd.h>
+
 #include <cstdio>
-#include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <string>
 
 #include "api/client.h"
@@ -14,14 +17,28 @@ int Fail(const char* message) {
   return 1;
 }
 
-}  // namespace
+struct TempDir {
+  std::filesystem::path path;
 
-int main(int argc, char** argv) {
-  if (argc < 2) {
-    std::fprintf(stderr, "usage: %s <plugin-directory>\n", argv[0]);
-    return 2;
+  TempDir() {
+    path = std::filesystem::temp_directory_path() /
+           ("spark-plugin-test-" + std::to_string(::getpid()));
+    std::error_code error;
+    std::filesystem::remove_all(path, error);
+    std::filesystem::create_directories(path, error);
   }
 
+  ~TempDir() {
+    std::error_code error;
+    std::filesystem::remove_all(path, error);
+  }
+};
+
+}  // namespace
+
+// The host only loads plugins; this test therefore never assumes that one was
+// built together with it. Real plugin modules are tested in their own project.
+int main() {
   spark::Config config;
   config.token.plaintext = "secret-account-token";
   config.forum.token = "secret-forum-token";
@@ -30,35 +47,31 @@ int main(int argc, char** argv) {
   spark::ForumClient forum(config.EffectiveForum(), false, config.forum.token);
   spark::PluginHost host(&api, &forum, &config);
 
-  if (host.LoadDirectory(argv[1]) != 1) {
-    return Fail("expected exactly one plugin to load");
+  // A missing or empty directory is a normal installation without plugins.
+  if (host.LoadDirectory("/nonexistent/spark-plugin-directory") != 0) {
+    return Fail("a missing plugin directory must not load anything");
   }
-  if (host.Plugins().size() != 1 ||
-      host.Plugins().front().id != "news-admin") {
-    return Fail("unexpected plugin metadata");
+  if (!host.Plugins().empty() || !host.Actions().empty()) {
+    return Fail("missing plugin directory produced entries");
   }
 
-  const auto actions = host.Actions();
-  if (actions.size() != 4) return Fail("expected four actions");
-  bool hasSave = false;
-  for (const auto& action : actions) {
-    if (action.id == "save-news") {
-      hasSave = true;
-      if (action.pluginId != "news-admin") return Fail("wrong action owner");
-      if (action.fields.size() != 2) return Fail("wrong save-news fields");
+  // Broken modules are skipped instead of aborting startup.
+  {
+    const TempDir tmp;
+    {
+      std::ofstream broken(tmp.path / "broken.so");
+      broken << "this is not a shared object";
     }
-  }
-  if (!hasSave) return Fail("save-news action missing");
-
-  nlohmann::json result;
-  std::string error;
-  if (host.Run("news-admin", "no-such-action", nlohmann::json::object(),
-               result, error)) {
-    return Fail("unknown action unexpectedly succeeded");
-  }
-  if (host.Run("missing-plugin", "save-news", nlohmann::json::object(),
-               result, error)) {
-    return Fail("unknown plugin unexpectedly succeeded");
+    {
+      std::ofstream ignored(tmp.path / "readme.txt");
+      ignored << "not a plugin";
+    }
+    if (host.LoadDirectory(tmp.path.string()) != 0) {
+      return Fail("a broken plugin was loaded");
+    }
+    if (!host.Plugins().empty()) {
+      return Fail("a broken plugin was registered");
+    }
   }
 
   // Credentials must never be part of the settings handed to a plugin.
@@ -68,7 +81,29 @@ int main(int argc, char** argv) {
     return Fail("sanitized settings leaked credentials");
   }
 
-#ifndef _WIN32
+  // Action scopes gate the UI. An empty token scope list means the token
+  // predates scope storage, so the server makes the final decision.
+  {
+    spark::PluginAction action;
+    action.scopes = {"news.edit"};
+    const std::vector<std::string> none;
+    const std::vector<std::string> wildcard = {"*"};
+    const std::vector<std::string> allowed = {"news.edit", "profile.read"};
+    const std::vector<std::string> denied = {"news.read"};
+    if (!spark::PluginScopesAllow(action, none)) {
+      return Fail("empty token scopes must not hide actions");
+    }
+    if (!spark::PluginScopesAllow(action, wildcard)) {
+      return Fail("wildcard token scope must allow actions");
+    }
+    if (!spark::PluginScopesAllow(action, allowed)) {
+      return Fail("matching token scope must allow actions");
+    }
+    if (spark::PluginScopesAllow(action, denied)) {
+      return Fail("missing token scope must hide actions");
+    }
+  }
+
   // $SPARK_PLUGIN_PATH is a path list; duplicates must collapse.
   setenv("SPARK_PLUGIN_PATH", "/tmp/spark-a:/tmp/spark-a:/tmp/spark-b", 1);
   const auto paths = spark::PluginSearchPaths();
@@ -76,7 +111,6 @@ int main(int argc, char** argv) {
       paths[1] != "/tmp/spark-b") {
     return Fail("SPARK_PLUGIN_PATH was not parsed correctly");
   }
-#endif
 
   std::printf("plugin tests passed\n");
   return 0;

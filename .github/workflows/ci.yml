@@ -64,14 +64,39 @@ jobs:
           gtk=OFF
           if [ "${GITHUB_REF_TYPE}" = "tag" ]; then gtk=ON; fi
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
-            -DSPARK_TUI_BUILD_GTK=$gtk \
-            -DSPARK_TUI_BUILD_PLUGINS=ON
+            -DSPARK_TUI_BUILD_GTK=$gtk
 
       - name: Build
         run: cmake --build build --parallel 4
 
       - name: Test
         run: ctest --test-dir build --output-on-failure
+
+      # Plugins are never built here. This only proves that the installed
+      # plugin SDK is self-contained and usable by an out-of-tree project.
+      - name: Plugin SDK smoke test
+        run: |
+          cat > /tmp/spark_sdk_smoke.cpp <<'EOF'
+          #include <string>
+
+          #include "plugin/sdk.h"
+
+          class SmokePlugin : public spark::plugin::Plugin {
+           public:
+            explicit SmokePlugin(const spark_host_api* host)
+                : spark::plugin::Plugin(host) {}
+            std::string Id() const override { return "sdk-smoke"; }
+            std::string ActionsJson() const override { return "[]"; }
+            std::string RunJson(const std::string&,
+                                const std::string&) override {
+              return "{\"ok\":true}";
+            }
+          };
+
+          SPARK_PLUGIN_EXPORT(SmokePlugin)
+          EOF
+          g++ -std=c++20 -shared -fPIC -Wall -Wextra -Wpedantic \
+            -I src /tmp/spark_sdk_smoke.cpp -o /tmp/spark_sdk_smoke.so
 
       # Pushing a branch only compiles and tests. Release artifacts are
       # produced exclusively for v* tags so a merge request can be checked

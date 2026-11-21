@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.1
 
 ### 新增
 
@@ -12,6 +12,8 @@
   - 网络请求在 `spark::Worker` 线程池执行，结果经 `g_idle_add` 回到 GTK 主循环；
   - 线程池 `Worker` 从 TUI 移入 `spark_core`，TUI 与 GTK 共用；
   - GTK 登录界面尚未接入，登录仍通过 `spark-tui`，两者共享同一份配置。
+- TUI 和 GTK 增加可配置顶栏：内置页面和插件动作都可以设置显示、折叠和顺序；
+  TUI 使用单行滑动条，GTK 使用侧栏左滑进入折叠面板并提供返回按钮。
 
 ### 构建
 
@@ -32,7 +34,10 @@
   不再单独挂 `.deb`、源码包和 zip；
 - GTK 前端在独立的 `gtk-framework` 任务中做分支 / PR 构建检查；tag 时由
   Linux 任务生成 `sparkapp-gui` 的 `.deb`，但“解压即用”的 Linux tar 仍只带
-  core + TUI。
+  core + TUI；
+- 插件（包括官方插件）不再在主项目中构建、安装或打包；主项目只安装插件 SDK，
+  `sparkapp-core` 提供 `spark-plugin-abi-<N>` 虚拟包，官方插件移到独立项目
+  `spark-client-plugins`。
 
 ## 0.2.0
 

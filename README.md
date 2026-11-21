@@ -333,8 +333,8 @@ Flarum 2.x 的置顶 / 锁定 / 隐藏 / 重命名 / 标签通过
    `.deb` / `.dsc` / zip。
 4. 发布版本只需要推 tag：
    ```bash
-   git tag v0.3.0
-   git push origin v0.3.0
+   git tag v0.4.1
+   git push origin v0.4.1
    ```
    同一个 workflow 会创建 GitHub Release，并附上所有平台包和统一的
    `SHA256SUMS`。
@@ -346,24 +346,24 @@ Flarum 2.x 的置顶 / 锁定 / 隐藏 / 重命名 / 标签通过
    #   - core：共享库 + spark-client，不依赖 GTK
    #   - tui ：终端前端，不依赖 GTK
    #   - gui ：GTK 前端，依赖 core + libgtk-4-1 + libadwaita-1-0
-   sudo apt install ./sparkapp-core_0.3.0_amd64.deb \
-                    ./sparkapp-tui_0.3.0_amd64.deb
-   sudo apt install ./sparkapp-core_0.3.0_amd64.deb \
-                    ./sparkapp-gui_0.3.0_amd64.deb
+   sudo apt install ./sparkapp-core_0.4.1_amd64.deb \
+                    ./sparkapp-tui_0.4.1_amd64.deb
+   sudo apt install ./sparkapp-core_0.4.1_amd64.deb \
+                    ./sparkapp-gui_0.4.1_amd64.deb
 
    # 统一入口：按会话自动启动 spark-gui 或 spark-tui
    spark-client
 
    # 其它 Linux：解压后直接运行（包内已带 libsparkapp-core.so）
-   tar -xzf spark-client_0.3.0_linux-amd64.tar.gz
-   ./spark-client-0.3.0-linux-amd64/spark-tui
-   ./spark-client-0.3.0-linux-amd64/spark-client   # 统一入口
+   tar -xzf spark-client_0.4.1_linux-amd64.tar.gz
+   ./spark-client-0.4.1-linux-amd64/spark-tui
+   ./spark-client-0.4.1-linux-amd64/spark-client   # 统一入口
    ```
-   Windows 解压 `spark-client_0.3.0_windows-amd64.zip` 或
-   `spark-client_0.3.0_windows-arm64.zip` 后运行 `spark-tui.exe`。
+   Windows 解压 `spark-client_0.4.1_windows-amd64.zip` 或
+   `spark-client_0.4.1_windows-arm64.zip` 后运行 `spark-tui.exe`。
 
-   Release 页面只提供完整总包 `spark-client_0.3.0_all.tar.gz`，解压后是
-   `spark-client-0.3.0/` 文件夹，包含三个 `.deb`、Windows zip、Linux tar、
+   Release 页面只提供完整总包 `spark-client_0.4.1_all.tar.gz`，解压后是
+   `spark-client-0.4.1/` 文件夹，包含三个 `.deb`、Windows zip、Linux tar、
    Debian 源码包和内部 `SHA256SUMS`，可以直接作为手动导入 deb 源的目录。
 
    二进制包拆分为：
@@ -384,15 +384,15 @@ Flarum 2.x 的置顶 / 锁定 / 隐藏 / 重命名 / 标签通过
    项目使用 Debian native 源码包（`debian/source/format` 为
    `3.0 (native)`），所以只有一个 `.tar.xz`，`debian/` 也在里面：
    ```bash
-   dpkg-source -x spark-client_0.3.0.dsc
-   cd spark-client-0.3.0
+   dpkg-source -x spark-client_0.4.1.dsc
+   cd spark-client-0.4.1
    dpkg-buildpackage -us -uc
    ```
 
    CI 生成源码包时使用 `dpkg-buildpackage -S -us -uc -d -nc`。
 
-版本号遵循 SemVer（`MAJOR.MINOR.PATCH`，例如 `0.3.0`），不带 Debian
-修订后缀；重要测试节点直接打对应 tag（如 `v0.3.0`），日常测试不推 tag，
+版本号遵循 SemVer（`MAJOR.MINOR.PATCH`，例如 `0.4.1`），不带 Debian
+修订后缀；重要测试节点直接打对应 tag（如 `v0.4.1`），日常测试不推 tag，
 直接使用 Actions artifact 即可。
 
 GitHub Actions 对公开仓库的标准 Linux runner **不计分钟数**；私有仓库
@@ -423,13 +423,13 @@ Gitea 忽略 `.github/workflows`，避免在没有 runner 时出现
 
 ```text
 MAJOR.MINOR.PATCH
-0.3.0
+0.4.1
 ```
 
 CMake 从这里生成：
 
-- `SPARK_TUI_PROJECT_VERSION`：`0.3.0`
-- `SPARK_TUI_PACKAGE_VERSION`：`0.3.0`
+- `SPARK_TUI_PROJECT_VERSION`：`0.4.1`
+- `SPARK_TUI_PACKAGE_VERSION`：`0.4.1`
 - 程序里的 `SPARK_TUI_VERSION`、`spark-tui --version`
 - `.deb` 文件名、Linux tar / Windows zip 文件名
 - Debian 源码包版本
@@ -442,7 +442,7 @@ packaging/sync-version.sh
 
 它会更新 `debian/changelog` 和 `vcpkg.json`。CI 会运行
 `packaging/sync-version.sh --check`，并校验 tag 必须等于 `v${VERSION}`，
-例如 `VERSION=0.3.0` 只能打 `v0.3.0`。
+例如 `VERSION=0.4.1` 只能打 `v0.4.1`。
 
 ## 打包 .deb
 

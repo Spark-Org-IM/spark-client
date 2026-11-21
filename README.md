@@ -328,9 +328,9 @@ Flarum 2.x 的置顶 / 锁定 / 隐藏 / 重命名 / 标签通过
      构建检查（仅当 `src/gtk/` 存在）；tag 构建时由 Linux 任务一并编译并生成
      `sparkapp-gui` 的 `.deb`，但它不会打进“解压即用”的 Linux tar 包。
 
-   tag 构建会把上述产物上传为 Actions artifact（保留 90 天），并在 Release
-   页面只发布一个完整总包 `spark-client_<version>_all.tar.gz`，不再单独挂
-   `.deb` / `.dsc` / zip。
+   tag 构建会把上述产物上传为 Actions artifact（保留 90 天）。Release 页面
+   把每个包单独挂出：各架构的 `.deb`、Linux 独立运行 tar、Windows zip、
+   Debian 源码包和各自的 `SHA256SUMS`，不再打总包。
 4. 发布版本只需要推 tag：
    ```bash
    git tag v0.4.1
@@ -362,9 +362,9 @@ Flarum 2.x 的置顶 / 锁定 / 隐藏 / 重命名 / 标签通过
    Windows 解压 `spark-client_0.4.1_windows-amd64.zip` 或
    `spark-client_0.4.1_windows-arm64.zip` 后运行 `spark-tui.exe`。
 
-   Release 页面只提供完整总包 `spark-client_0.4.1_all.tar.gz`，解压后是
-   `spark-client-0.4.1/` 文件夹，包含三个 `.deb`、Windows zip、Linux tar、
-   Debian 源码包和内部 `SHA256SUMS`，可以直接作为手动导入 deb 源的目录。
+   Release 页面把 `.deb`、Linux tar、Windows zip、Debian 源码包和
+   `SHA256SUMS` 分开挂出，直接下载需要的文件；`.deb` 和源码包可以直接
+   作为手动导入 deb 源的目录。
 
    二进制包拆分为：
 

@@ -330,30 +330,20 @@ jobs:
           merge-multiple: true
           path: dist
 
-      - name: Create release bundle
+      # Packages stay separate: every .deb, runtime tar, zip, source file
+      # and checksum file becomes its own release asset.
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -eu
-          cd dist
-          rm -f SHA256SUMS* spark-client_*_all.tar.gz
-          version="${GITHUB_REF_NAME#v}"
-          folder="spark-client-${version}"
-          rm -rf "../bundle"
-          mkdir -p "../bundle/${folder}"
-          find . -maxdepth 1 -type f \
-            \( -name '*.deb' -o -name '*.zip' -o -name '*.dsc' -o -name '*.changes' \
-               -o -name '*.buildinfo' -o -name '*.tar.xz' \
-               -o -name '*_linux-*.tar.gz' \) \
-            -exec cp {} "../bundle/${folder}/" \;
-          (
-            cd "../bundle/${folder}"
-            find . -maxdepth 1 -type f -printf '%f\n' | sort \
-              | xargs -r sha256sum > /tmp/spark-tui-bundle-SHA256SUMS
-            mv /tmp/spark-tui-bundle-SHA256SUMS SHA256SUMS
-          )
-          tar -C ../bundle -czf "spark-client_${version}_all.tar.gz" "${folder}"
-
-      - name: Publish GitHub release
-        uses: softprops/action-gh-release@v3
-        with:
-          files: dist/spark-client_*_all.tar.gz
-          generate_release_notes: true
+          tag="$GITHUB_REF_NAME"
+          mapfile -t files < <(find dist -maxdepth 1 -type f | sort)
+          test "${#files[@]}" -gt 0
+          printf '%s\n' "${files[@]}"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" "${files[@]}" --clobber
+          else
+            gh release create "$tag" "${files[@]}" \
+              --title "$tag" --generate-notes
+          fi

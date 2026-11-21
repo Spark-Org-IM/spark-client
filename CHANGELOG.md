@@ -30,8 +30,8 @@
 - Linux 独立运行包内含 `libsparkapp-core.so`，rpath 为 `$ORIGIN`，解压即可运行；
 - push / PR 只构建并运行测试，方便合并前检查；`v*` tag 才打包、上传
   artifact 并汇总发布 Release；
-- Release 页面只发布一个完整总包 `spark-client_<version>_all.tar.gz`，
-  不再单独挂 `.deb`、源码包和 zip；
+- Release 页面把每个包单独挂出：各架构的 `.deb`、Linux 独立运行 tar、
+  Windows zip、每个包的 `SHA256SUMS` 和源码包；
 - GTK 前端在独立的 `gtk-framework` 任务中做分支 / PR 构建检查；tag 时由
   Linux 任务生成 `sparkapp-gui` 的 `.deb`，但“解压即用”的 Linux tar 仍只带
   core + TUI；

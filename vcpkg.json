@@ -1,6 +1,6 @@
 {
   "name": "spark-tui",
-  "version-string": "0.4.1",
+  "version-string": "0.4.2",
   "description": "Spark ORG terminal client",
   "dependencies": [
     "openssl"

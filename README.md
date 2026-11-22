@@ -321,50 +321,54 @@ Flarum 2.x 的置顶 / 锁定 / 隐藏 / 重命名 / 标签通过
 3. `.github/workflows/ci.yml` 在 push / PR 时只做**构建和单元测试**，方便合并前
    快速检查；打包和上传产物只在 `v*` tag 上执行：
    - Linux amd64 / arm64：`sparkapp-core`、`sparkapp-tui`、`sparkapp-gui`
-     三个 `.deb`，以及自包含运行包 `.tar.gz`；
+     三个 `.deb`；
    - Windows amd64 / arm64：`.zip`（静态链接 OpenSSL，单 exe）；
    - Debian 源码包（native）：`.dsc` + `.tar.xz` + `.changes` + `.buildinfo`；
    - GTK 前端 `spark-gui` 在独立的 `gtk-framework` 任务里做分支 / PR 的快速
      构建检查（仅当 `src/gtk/` 存在）；tag 构建时由 Linux 任务一并编译并生成
-     `sparkapp-gui` 的 `.deb`，但它不会打进“解压即用”的 Linux tar 包。
+     `sparkapp-gui` 的 `.deb`。
 
-   tag 构建会把上述产物上传为 Actions artifact（保留 90 天），并在 Release
-   页面只发布一个完整总包 `spark-client_<version>_all.tar.gz`，不再单独挂
-   `.deb` / `.dsc` / zip。
+   Release 页面按下面方式发布：
+
+   - `spark-client_<version>_linux-amd64.tar.gz` /
+     `spark-client_<version>_linux-arm64.tar.gz`：只包含该架构的 core / tui /
+     gui 三个 `.deb`，以及内部 `SHA256SUMS`；
+   - `spark-client_<version>_all.tar.gz`：两个架构的 `.deb`、源码包
+     `.dsc` / `.tar.xz` / `.changes` / `.buildinfo`，以及 README、LICENSE、
+     `SHA256SUMS`，所有文件平铺在 tar 根目录，便于直接导入 deb 源；
+   - `spark-client_<version>_windows-amd64.zip` /
+     `spark-client_<version>_windows-arm64.zip`。
 4. 发布版本只需要推 tag：
    ```bash
-   git tag v0.4.1
-   git push origin v0.4.1
+   git tag v0.4.2
+   git push origin v0.4.2
    ```
-   同一个 workflow 会创建 GitHub Release，并附上所有平台包和统一的
-   `SHA256SUMS`。
+   同一个 workflow 会创建 GitHub Release，并附上各架构的 Debian 包 tar、
+   源码 all tar 和 Windows zip。
 5. 用户从 Release 页面下载后校验并安装：
    ```bash
    sha256sum -c SHA256SUMS
 
-   # Debian / Ubuntu：三个包互相独立，按需安装
+   # Debian / Ubuntu：解压对应架构的 tar，按需安装
    #   - core：共享库 + spark-client，不依赖 GTK
    #   - tui ：终端前端，不依赖 GTK
    #   - gui ：GTK 前端，依赖 core + libgtk-4-1 + libadwaita-1-0
-   sudo apt install ./sparkapp-core_0.4.1_amd64.deb \
-                    ./sparkapp-tui_0.4.1_amd64.deb
-   sudo apt install ./sparkapp-core_0.4.1_amd64.deb \
-                    ./sparkapp-gui_0.4.1_amd64.deb
+   tar -xzf spark-client_0.4.2_linux-amd64.tar.gz
+   cd spark-client-0.4.2-linux-amd64
+   sha256sum -c SHA256SUMS
+   sudo apt install ./sparkapp-core_0.4.2_amd64.deb \
+                    ./sparkapp-tui_0.4.2_amd64.deb
+   sudo apt install ./sparkapp-core_0.4.2_amd64.deb \
+                    ./sparkapp-gui_0.4.2_amd64.deb
 
    # 统一入口：按会话自动启动 spark-gui 或 spark-tui
    spark-client
-
-   # 其它 Linux：解压后直接运行（包内已带 libsparkapp-core.so）
-   tar -xzf spark-client_0.4.1_linux-amd64.tar.gz
-   ./spark-client-0.4.1-linux-amd64/spark-tui
-   ./spark-client-0.4.1-linux-amd64/spark-client   # 统一入口
    ```
-   Windows 解压 `spark-client_0.4.1_windows-amd64.zip` 或
-   `spark-client_0.4.1_windows-arm64.zip` 后运行 `spark-tui.exe`。
+   Windows 解压 `spark-client_0.4.2_windows-amd64.zip` 或
+   `spark-client_0.4.2_windows-arm64.zip` 后运行 `spark-tui.exe`。
 
-   Release 页面只提供完整总包 `spark-client_0.4.1_all.tar.gz`，解压后是
-   `spark-client-0.4.1/` 文件夹，包含三个 `.deb`、Windows zip、Linux tar、
-   Debian 源码包和内部 `SHA256SUMS`，可以直接作为手动导入 deb 源的目录。
+   `spark-client_0.4.2_all.tar.gz` 解压后文件平铺在当前目录，包含两个
+   架构的 `.deb`、源码包和校验和，可以直接作为手动导入 deb 源的目录。
 
    二进制包拆分为：
 
@@ -384,15 +388,15 @@ Flarum 2.x 的置顶 / 锁定 / 隐藏 / 重命名 / 标签通过
    项目使用 Debian native 源码包（`debian/source/format` 为
    `3.0 (native)`），所以只有一个 `.tar.xz`，`debian/` 也在里面：
    ```bash
-   dpkg-source -x spark-client_0.4.1.dsc
-   cd spark-client-0.4.1
+   dpkg-source -x spark-client_0.4.2.dsc
+   cd spark-client-0.4.2
    dpkg-buildpackage -us -uc
    ```
 
    CI 生成源码包时使用 `dpkg-buildpackage -S -us -uc -d -nc`。
 
-版本号遵循 SemVer（`MAJOR.MINOR.PATCH`，例如 `0.4.1`），不带 Debian
-修订后缀；重要测试节点直接打对应 tag（如 `v0.4.1`），日常测试不推 tag，
+版本号遵循 SemVer（`MAJOR.MINOR.PATCH`，例如 `0.4.2`），不带 Debian
+修订后缀；重要测试节点直接打对应 tag（如 `v0.4.2`），日常测试不推 tag，
 直接使用 Actions artifact 即可。
 
 GitHub Actions 对公开仓库的标准 Linux runner **不计分钟数**；私有仓库
@@ -423,13 +427,13 @@ Gitea 忽略 `.github/workflows`，避免在没有 runner 时出现
 
 ```text
 MAJOR.MINOR.PATCH
-0.4.1
+0.4.2
 ```
 
 CMake 从这里生成：
 
-- `SPARK_TUI_PROJECT_VERSION`：`0.4.1`
-- `SPARK_TUI_PACKAGE_VERSION`：`0.4.1`
+- `SPARK_TUI_PROJECT_VERSION`：`0.4.2`
+- `SPARK_TUI_PACKAGE_VERSION`：`0.4.2`
 - 程序里的 `SPARK_TUI_VERSION`、`spark-tui --version`
 - `.deb` 文件名、Linux tar / Windows zip 文件名
 - Debian 源码包版本
@@ -442,7 +446,7 @@ packaging/sync-version.sh
 
 它会更新 `debian/changelog` 和 `vcpkg.json`。CI 会运行
 `packaging/sync-version.sh --check`，并校验 tag 必须等于 `v${VERSION}`，
-例如 `VERSION=0.4.1` 只能打 `v0.4.1`。
+例如 `VERSION=0.4.2` 只能打 `v0.4.2`。
 
 ## 打包 .deb
 

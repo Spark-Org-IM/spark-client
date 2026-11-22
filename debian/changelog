@@ -1,6 +1,9 @@
-spark-client (0.4.1) unstable; urgency=medium
+spark-client (0.4.2) unstable; urgency=medium
 
-  * Release 0.4.1.
+  * Release 0.4.2.
+  * Split release assets by platform and architecture: per-architecture
+    Debian package tars, a flat all tar with both architectures' debs and
+    the source package, and one Windows zip per architecture.
   * Ship the plugin SDK headers and stop building or packaging plugins here;
     each plugin is now a separate source package.
 
